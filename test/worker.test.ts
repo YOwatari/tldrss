@@ -430,12 +430,28 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
-  it("serves 200 and stores nothing when the model call fails", async () => {
+  it("falls back to a list of the day's entries when the model call fails", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
 
     const response = await callWorker({ ...bindings, AI: { run } as unknown as Ai });
+
+    // The first request predates the digest, so the fallback shows up in KV.
+    expect(response.status).toBe(200);
+    const stored = await storedDigest();
+    expect(stored?.value).toContain("A summary could not be generated");
+    expect(stored?.value).toContain(`${FEED_ORIGIN}/1`);
+    expect(stored?.value).toContain("Entry 1");
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("stores nothing when the feed itself cannot be read", async () => {
+    stubFeedFetch(() => new Response("nope", { status: 500 }));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(200);
     expect(await response.text()).not.toContain("<item>");
@@ -444,7 +460,7 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
-  it("retries the model call on the next request after it failed", async () => {
+  it("does not call the model again once a fallback digest is stored", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     // Both attempts of the first request fail; see `workers-ai.ts` for the
@@ -459,9 +475,11 @@ describe("GET /feed (upstream failures)", () => {
     await callWorker(env);
     await callWorker(env);
 
-    expect(run).toHaveBeenCalledTimes(3);
+    // The fallback digest fills today's slot, so the second request is a cache
+    // hit and the model is left alone until tomorrow.
+    expect(run).toHaveBeenCalledTimes(2);
     await expect(storedDigest()).resolves.toMatchObject({
-      value: expect.stringContaining("- summary"),
+      value: expect.stringContaining("A summary could not be generated"),
     });
     errors.mockRestore();
   });

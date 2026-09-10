@@ -5,7 +5,7 @@
 import type { FeedEntry } from "../feed/parse";
 import { sanitizeLlmHtml } from "../llm/sanitize";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
-import { untitledEntryText } from "./text";
+import { summaryUnavailableText, untitledEntryText } from "./text";
 
 /**
  * `[3] Something happened.` — the shape each bullet of the model's answer is
@@ -88,13 +88,17 @@ function safeHref(link: string | undefined): string | null {
   }
 }
 
-function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
+/** The entry's title, linked to the article when the feed gave a usable url. */
+function renderHeading(entry: FeedEntry, language: DigestLanguage): string {
   // Title and url come from the feed, never from the model.
   const title = escapeHtml(entry.title ?? untitledEntryText(language));
   const href = safeHref(entry.link);
-  const heading = href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
 
-  return `  <li>${heading}<br />${escapeHtml(summary)}</li>`;
+  return href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
+}
+
+function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
+  return `  <li>${renderHeading(entry, language)}<br />${escapeHtml(summary)}</li>`;
 }
 
 /**
@@ -127,4 +131,24 @@ export function renderDigestHtml(
     lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;
 
   return `${paragraph}<ul>\n${items.join("\n")}\n</ul>`;
+}
+
+/**
+ * The digest body served when no summary could be produced: a note saying so,
+ * then the day's entries as links.
+ *
+ * A subscription that goes silent on a model outage looks broken, and the
+ * titles and links alone are still worth delivering, so the digest degrades
+ * to this rather than to nothing.
+ */
+export function renderEntryListHtml(
+  entries: FeedEntry[],
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
+  const notice = `<p>${escapeHtml(summaryUnavailableText(language))}</p>`;
+  if (entries.length === 0) return notice;
+
+  const items = entries.map((entry) => `  <li>${renderHeading(entry, language)}</li>`);
+
+  return `${notice}\n<ul>\n${items.join("\n")}\n</ul>`;
 }

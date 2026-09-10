@@ -4,12 +4,12 @@ import {
   type DigestLanguage,
   isDigestLanguage,
 } from "../digest/language";
-import { renderDigestHtml } from "../digest/html";
+import { renderDigestHtml, renderEntryListHtml } from "../digest/html";
 import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
 import { noRecentEntriesText } from "../digest/text";
 import { type Env, maxEntriesOf } from "../env";
 import { parseFeed } from "../feed/parse";
-import { selectRecentEntries } from "../feed/select";
+import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
 import { createWorkersAiSummarizer } from "../llm/workers-ai";
 import { sha256Hex } from "../hash";
@@ -107,6 +107,42 @@ export async function handleFeed(
 }
 
 /**
+ * The digest body: the model's summary, or the day's entries as bare links
+ * when summarizing failed.
+ *
+ * Only the summary is given up on. Titles and links are already in hand, and
+ * a reader whose subscription goes silent on a model outage has no way to tell
+ * that from a broken feed. The fallback is then cached like any other digest,
+ * so a failure costs the day its summary rather than triggering a retry on
+ * every crawl.
+ */
+async function summarizeOrList(
+  env: Env,
+  selection: EntrySelection,
+  feedTitle: string,
+  language: DigestLanguage,
+): Promise<string> {
+  const summarizer: Summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
+
+  try {
+    const summary = await summarizer.summarize({
+      feedTitle,
+      entries: selection.entries,
+      availableCount: selection.availableCount,
+      language,
+    });
+
+    // Reference markers are numbered against the list the prompt used.
+    return renderDigestHtml(summary, selection.entries, language);
+  } catch (error) {
+    const kind = error instanceof Error ? error.name : typeof error;
+    console.error(`Failed to summarize ${selection.entries.length} entries (${kind})`);
+
+    return renderEntryListHtml(selection.entries, language);
+  }
+}
+
+/**
  * Fetches, summarizes and stores one digest. Runs outside the response, so
  * every failure is logged rather than surfaced: the reader has already been
  * served yesterday's digest or an empty channel.
@@ -153,22 +189,10 @@ async function buildDigest(
   const feedTitle = feed.title ?? feedUrl.host;
   const selection = selectRecentEntries(feed.items, { maxEntries: maxEntriesOf(env) });
 
-  const summarizer: Summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
-
   const summaryHtml =
     selection.entries.length === 0
       ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
-      : renderDigestHtml(
-          await summarizer.summarize({
-            feedTitle,
-            entries: selection.entries,
-            availableCount: selection.availableCount,
-            language: ref.language,
-          }),
-          // Reference markers are numbered against the list the prompt used.
-          selection.entries,
-          ref.language,
-        );
+      : await summarizeOrList(env, selection, feedTitle, ref.language);
 
   return buildRssXml({
     publicUrl,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderDigestHtml } from "../../src/digest/html";
+import { renderDigestHtml, renderEntryListHtml } from "../../src/digest/html";
 
 const entries = [
   { title: "First article", link: "https://example.com/1" },
@@ -178,5 +178,46 @@ describe("renderDigestHtml (lead)", () => {
 
     expect(html).not.toContain("<script>");
     expect(html).toContain("<p>&lt;script&gt;x&lt;/script&gt;</p>");
+  });
+});
+
+describe("renderEntryListHtml", () => {
+  const entries = [
+    { title: "First article", link: "https://example.com/1" },
+    { title: "Second article", link: "https://example.com/2" },
+  ];
+
+  it("says why the summary is missing and lists every entry as a link", () => {
+    const html = renderEntryListHtml(entries);
+
+    expect(html).toContain("<p>A summary could not be generated");
+    expect(html).toContain('<li><a href="https://example.com/1">First article</a></li>');
+    expect(html).toContain('<li><a href="https://example.com/2">Second article</a></li>');
+  });
+
+  it("writes the notice in Japanese for a Japanese digest", () => {
+    expect(renderEntryListHtml(entries, "ja")).toContain("要約を生成できませんでした");
+  });
+
+  it("keeps an entry the feed gave no link as plain text", () => {
+    expect(renderEntryListHtml([{ title: "No link" }])).toContain("<li>No link</li>");
+  });
+
+  it("labels an entry the feed gave no title", () => {
+    expect(renderEntryListHtml([{ link: "https://example.com/1" }])).toContain("(untitled)");
+  });
+
+  it("escapes a hostile title and refuses a hostile link", () => {
+    const html = renderEntryListHtml([
+      { title: "<script>alert(1)</script>", link: "javascript:alert(1)" },
+    ]);
+
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("renders the notice alone when there is nothing to list", () => {
+    expect(renderEntryListHtml([])).not.toContain("<ul>");
   });
 });
