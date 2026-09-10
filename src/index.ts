@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { handleScheduled } from "./handlers/cron";
 import { handleDigestPage } from "./handlers/digest-page";
 import { handleFeed } from "./handlers/feed";
 import { createWorkersAiSummarizer } from "./llm/workers-ai";
@@ -54,5 +55,22 @@ export default {
 
     // Doubles as the health check: a plain 200 with no binding access.
     return new Response(USAGE, { headers: { "content-type": "text/plain; charset=utf-8" } });
+  },
+
+  /**
+   * The morning pre-generation, on the schedule in `wrangler.toml`.
+   *
+   * Awaited rather than handed to `waitUntil`: the platform keeps a scheduled
+   * invocation alive for the promise it returns, and a run cut short would
+   * leave part of the subscription list without a digest.
+   */
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    const summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
+
+    await handleScheduled(controller, env, summarizer);
   },
 } satisfies ExportedHandler<Env>;

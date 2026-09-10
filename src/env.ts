@@ -16,6 +16,15 @@ export type Env = {
    * a daily reminder that a quiet feed was quiet.
    */
   POST_NO_UPDATES?: string | number | boolean;
+  /**
+   * The address readers reach this worker at, e.g. `https://tldrss.example`.
+   *
+   * A request carries its own origin, so only the cron run needs this: it has
+   * no request to read one off, and every link in the digest it stores has to
+   * be absolute. The workers.dev hostname is not available to the runtime,
+   * hence a var rather than a default.
+   */
+  PUBLIC_ORIGIN?: string;
 };
 
 /**
@@ -48,4 +57,28 @@ const TRUTHY_VALUES = new Set(["true", "1"]);
  */
 export function shouldPostNoUpdates(env: Env): boolean {
   return TRUTHY_VALUES.has(String(env.POST_NO_UPDATES).toLowerCase());
+}
+
+/**
+ * The configured public origin, or null when it is unset or unusable.
+ *
+ * Null rather than a guess: a digest built on a wrong origin would carry links
+ * to nowhere, and it is cached for two days. The caller decides what to do
+ * with the absence — see `handlers/cron.ts`, which reports it and stops.
+ */
+export function publicOriginOf(env: Env): string | null {
+  if (!env.PUBLIC_ORIGIN) return null;
+
+  let url: URL;
+  try {
+    url = new URL(env.PUBLIC_ORIGIN);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  // `origin` alone, so a path or query someone left in the var cannot end up
+  // in front of the digest path the links are built from.
+  return url.origin;
 }

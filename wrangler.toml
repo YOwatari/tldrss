@@ -9,6 +9,11 @@ id = "placeholder"
 [ai]
 binding = "AI"
 
+# 23:50 UTC is 08:50 JST: the digests are in KV before the 09:00 crawl, and
+# the ten minutes are the margin the run has to finish in.
+[triggers]
+crons = ["50 23 * * *"]
+
 [vars]
 AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 # Entries per digest. Bounds the prompt, and with it the cost of one digest.
@@ -16,3 +21,8 @@ MAX_ENTRIES = "30"
 # Publish a digest saying so on a day the feed published nothing. Off by
 # default: Slack posts one message per item, and a quiet feed needs no message.
 POST_NO_UPDATES = "false"
+# The address readers reach this worker at. The scheduled run has no request to
+# read an origin off, and every link it stores has to be absolute, so a run
+# without this var generates nothing. Set it to the deployed hostname
+# (`https://tldrss.<subdomain>.workers.dev` or a custom domain).
+PUBLIC_ORIGIN = ""

@@ -4,9 +4,10 @@ import {
   reset,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { sha256Hex } from "../src/hash";
+import { putSubscription } from "../src/store/subscriptions";
 import { jstDate, previousDate } from "../src/time";
 
 // `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
@@ -781,5 +782,67 @@ describe("GET /digest/{hash}/{date}", () => {
 
     const listed = await bindings.DIGEST_CACHE.list({ prefix: "digest-html:" });
     expect(listed.keys).toEqual([]);
+  });
+});
+
+describe("scheduled", () => {
+  const CRON = "50 23 * * *";
+  const SCHEDULED_TIME = Date.parse("2026-09-09T23:50:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SCHEDULED_TIME);
+  });
+
+  /** What the runtime hands `scheduled`; the handler reads two of its fields. */
+  function trigger(): ScheduledController {
+    return {
+      scheduledTime: SCHEDULED_TIME,
+      cron: CRON,
+      noRetry: () => {},
+    } as ScheduledController;
+  }
+
+  async function runSchedule(env: Env): Promise<void> {
+    const ctx = createExecutionContext();
+    await worker.scheduled?.(trigger(), env, ctx);
+    await waitOnExecutionContext(ctx);
+  }
+
+  it("pre-generates the digest of a registered subscription with the Workers AI model", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    await putSubscription(bindings.DIGEST_CACHE, await sha256Hex(FEED_URL), {
+      url: FEED_URL,
+      registeredAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+    });
+
+    await runSchedule({ ...bindings, AI: ai, PUBLIC_ORIGIN: "https://worker.example" });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    const stored = await storedDigest();
+    expect(stored?.key).toBe(
+      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en`,
+    );
+    expect(stored?.value).toContain("https://worker.example/digest/");
+  });
+
+  it("serves the pre-generated digest to the crawl that follows, without generating again", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai, PUBLIC_ORIGIN: "https://worker.example" };
+    await putSubscription(bindings.DIGEST_CACHE, await sha256Hex(FEED_URL), {
+      url: FEED_URL,
+      registeredAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+    });
+    await runSchedule(env);
+
+    vi.setSystemTime(SCHEDULED_TIME + 10 * 60 * 1000);
+    const body = await (await callWorker(env)).text();
+
+    expect(body).toContain("<item>");
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
