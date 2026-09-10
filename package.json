@@ -7,23 +7,26 @@
     "test": "vitest run",
     "build": "wrangler deploy --dry-run",
     "dev": "wrangler dev",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
-    "url": "http://localhost:26831/YOwatari/tldrss"
+    "url": "git+https://github.com/YOwatari/tldrss.git"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "rss-parser": "^3.13.0"
-  },
+  "author": "yowatari",
+  "license": "MIT",
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260910.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0",
+    "vitest": "^4.1.0",
     "wrangler": "^4.130.0"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "fast-xml-parser": "^5.11.1",
+    "html-entities": "^2.6.0"
+  }
 }
