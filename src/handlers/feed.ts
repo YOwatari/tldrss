@@ -40,8 +40,9 @@ function xmlResponse(xml: string): Response {
 }
 
 /**
- * The canonical form of a feed url: fragments never reach the server, so two
- * urls that differ only by one must not become two cache entries.
+ * The canonical form of a feed url. A fragment inside the `url` parameter does
+ * reach us, but it identifies a place in the document rather than a different
+ * feed, so it is dropped to keep both spellings on one cache entry.
  */
 function normalizeFeedUrl(raw: string): URL | null {
   let url: URL;
