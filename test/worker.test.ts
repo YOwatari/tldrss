@@ -13,7 +13,7 @@ import { jstDate, previousDate } from "../src/time";
 // `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
 // wrangler.toml, while Workers AI is stubbed per test (it would call out to the
 // Cloudflare API otherwise).
-const bindings = providedEnv as unknown as Omit<Env, "AI">;
+const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example" };
 
 const FEED_ORIGIN = "https://source.example";
 const FEED_URL = `${FEED_ORIGIN}/rss.xml`;
@@ -426,7 +426,7 @@ describe("GET /feed (upstream failures)", () => {
     // task hits the failing write.
     const failingCache = {
       ...bindings.DIGEST_CACHE,
-      get: async () => null,
+      get: async (key: string) => key.startsWith("sub:") ? JSON.stringify({ url: FEED_URL, registeredAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() }) : null,
       put: async () => {
         throw new Error("KV unavailable");
       },

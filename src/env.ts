@@ -3,6 +3,9 @@ import { DEFAULT_MAX_ENTRIES } from "./feed/select";
 export type Env = {
   DIGEST_CACHE: KVNamespace;
   AI: Ai;
+  ALLOWED_FEED_HOSTS?: string;
+  FEED_TOKEN?: string;
+  MAX_SUBSCRIPTIONS?: string | number;
   /** Workers AI model id; falls back to DEFAULT_AI_MODEL when unset. */
   AI_MODEL?: string;
   /**
@@ -81,4 +84,18 @@ export function publicOriginOf(env: Env): string | null {
   // `origin` alone, so a path or query someone left in the var cannot end up
   // in front of the digest path the links are built from.
   return url.origin;
+}
+
+
+export function maxSubscriptionsOf(env: Env): number {
+  const value = Number(env.MAX_SUBSCRIPTIONS);
+  return Number.isSafeInteger(value) && value > 0 ? value : 20;
+}
+
+/** Exact hostnames, with all configured restrictions required. Fail closed. */
+export function isFeedAllowed(env: Env, feed: URL, token: string | null): boolean {
+  const hosts = (env.ALLOWED_FEED_HOSTS ?? "").split(",").map(host => host.trim().toLowerCase()).filter(Boolean);
+  if (!hosts.length && !env.FEED_TOKEN) return false;
+  if (hosts.length && !hosts.includes(feed.hostname.toLowerCase())) return false;
+  return !env.FEED_TOKEN || token === env.FEED_TOKEN;
 }

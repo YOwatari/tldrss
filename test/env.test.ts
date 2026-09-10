@@ -1,3 +1,4 @@
+import { type Env, maxSubscriptionsOf } from "../src/env";
 import { describe, expect, it } from "vitest";
 import {
   MAX_ENTRIES_CEILING,
@@ -89,4 +90,12 @@ describe("publicOriginOf", () => {
     expect(publicOriginOf(envWith(""))).toBeNull();
     expect(publicOriginOf(envWith("ftp://tldrss.example"))).toBeNull();
   });
+});
+
+
+it.each([undefined, "", "0", "-1", "1.5", "oops", "Infinity"])("defaults invalid subscription cap %s to twenty", value => {
+  expect(maxSubscriptionsOf({ MAX_SUBSCRIPTIONS: value } as Env)).toBe(20);
+});
+it("accepts a positive subscription cap", () => {
+  expect(maxSubscriptionsOf({ MAX_SUBSCRIPTIONS: "3" } as Env)).toBe(3);
 });

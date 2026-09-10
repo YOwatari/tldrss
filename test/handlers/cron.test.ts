@@ -5,7 +5,7 @@ import { DEFAULT_LANGUAGE } from "../../src/digest/language";
 import type { Env } from "../../src/env";
 import { sha256Hex } from "../../src/hash";
 import { digestCacheKey } from "../../src/store/digest-cache";
-import { putSubscription } from "../../src/store/subscriptions";
+import { putSubscription, subscriptionKey, SUBSCRIPTION_TTL_SECONDS } from "../../src/store/subscriptions";
 import type { DigestInput, Summarizer } from "../../src/llm/summarizer";
 
 /** The handler takes a `Summarizer`, so these tests need no `AI` binding. */
@@ -267,4 +267,73 @@ describe("handleScheduled", () => {
       }),
     );
   });
+});
+
+
+async function legacySubscription(url: string, ageMs: number): Promise<string> {
+  const hash = await sha256Hex(url);
+  await kv.put(subscriptionKey(hash), JSON.stringify({
+    url,
+    registeredAt: "2026-08-01T00:00:00.000Z",
+    lastSeenAt: new Date(SCHEDULED_TIME - ageMs).toISOString(),
+  }));
+  return hash;
+}
+
+it("deletes legacy records at the eight-day boundary without fetching or generating them", async () => {
+  const age = SUBSCRIPTION_TTL_SECONDS * 1000;
+  const stale = await legacySubscription("https://stale.example/rss", age);
+  const older = await legacySubscription("https://older.example/rss", age + 1);
+  const active = await legacySubscription("https://active.example/rss", age - 1);
+  const fetched = stubFeedFetch();
+  const summarizer = fakeSummarizer();
+  const summary = await run(envWith(), summarizer);
+  expect(summary).toMatchObject({ total: 3, generated: 1, skipped: 2, failed: 0 });
+  expect(await kv.get(subscriptionKey(stale))).toBeNull();
+  expect(await kv.get(subscriptionKey(older))).toBeNull();
+  expect(await kv.get(subscriptionKey(active))).not.toBeNull();
+  expect(await digestOf(stale)).toBeNull();
+  expect(fetched).toEqual(["https://active.example/rss"]);
+  expect(summarizer.calls).toHaveLength(1);
+});
+
+it("preserves a legacy subscription refreshed after listing", async () => {
+  const url = "https://refreshed.example/rss";
+  const hash = await legacySubscription(url, SUBSCRIPTION_TTL_SECONDS * 1000);
+  let reads = 0;
+  const cache = {
+    get: async (key: string) => {
+      if (key === subscriptionKey(hash) && ++reads === 2) {
+        await putSubscription(kv, hash, {
+          url, registeredAt: "2026-08-01T00:00:00.000Z",
+          lastSeenAt: new Date(SCHEDULED_TIME).toISOString(),
+        });
+      }
+      return kv.get(key);
+    },
+    list: kv.list.bind(kv), put: kv.put.bind(kv), delete: kv.delete.bind(kv),
+  } as unknown as KVNamespace;
+  const fetched = stubFeedFetch();
+  const summary = await run(envWith({ DIGEST_CACHE: cache }), fakeSummarizer());
+  expect(summary).toMatchObject({ generated: 1, skipped: 0, failed: 0 });
+  expect(await kv.get(subscriptionKey(hash))).not.toBeNull();
+  expect(fetched).toEqual([url]);
+});
+
+it("continues active feeds when legacy cleanup fails", async () => {
+  const stale = await legacySubscription("https://stale.example/rss", SUBSCRIPTION_TTL_SECONDS * 1000);
+  await register("https://active.example/rss");
+  const cache = {
+    get: kv.get.bind(kv), list: kv.list.bind(kv), put: kv.put.bind(kv),
+    delete: async (key: string) => {
+      if (key === subscriptionKey(stale)) throw new Error("Delete failed");
+      return kv.delete(key);
+    },
+  } as unknown as KVNamespace;
+  const fetched = stubFeedFetch();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const summary = await run(envWith({ DIGEST_CACHE: cache }), fakeSummarizer());
+  expect(summary).toMatchObject({ total: 2, generated: 1, skipped: 0, failed: 1 });
+  expect(await kv.get(subscriptionKey(stale))).not.toBeNull();
+  expect(fetched).toEqual(["https://active.example/rss"]);
 });

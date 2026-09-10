@@ -15,6 +15,9 @@ binding = "AI"
 crons = ["50 23 * * *"]
 
 [vars]
+# Set exact feed hostnames, comma-separated, or configure FEED_TOKEN as a secret.
+ALLOWED_FEED_HOSTS = ""
+MAX_SUBSCRIPTIONS = "20"
 AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 # Entries per digest. Bounds the prompt, and with it the cost of one digest.
 MAX_ENTRIES = "30"

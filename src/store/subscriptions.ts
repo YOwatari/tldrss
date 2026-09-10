@@ -1,3 +1,5 @@
+import { sha256Hex } from "../hash";
+
 /**
  * The feeds the cron run pre-generates a digest for.
  *
@@ -63,7 +65,9 @@ export async function putSubscription(
   hash: string,
   subscription: Subscription,
 ): Promise<void> {
-  await cache.put(subscriptionKey(hash), JSON.stringify(subscription));
+  await cache.put(subscriptionKey(hash), JSON.stringify(subscription), {
+    expirationTtl: SUBSCRIPTION_TTL_SECONDS,
+  });
 }
 
 /**
@@ -103,4 +107,63 @@ export async function listSubscriptions(
   } while (cursor);
 
   return entries;
+}
+
+
+export const SUBSCRIPTION_TTL_SECONDS = 8 * 24 * 60 * 60;
+export const TOUCH_INTERVAL_MS = 12 * 60 * 60 * 1000;
+export class SubscriptionLimitError extends Error {}
+
+/** Read a subscription without listing the namespace on each crawl. */
+export async function getSubscription(cache: KVNamespace, hash: string): Promise<Subscription | null> {
+  const stored = await cache.get(subscriptionKey(hash));
+  return stored === null ? null : parseSubscription(stored);
+}
+
+/**
+ * Register a normalized URL once; existing records retain both timestamps.
+ * The cap applies only to new subscriptions. KV cannot enforce an atomic cap
+ * across isolates; new admissions are serialized within this isolate.
+ * Existing subscriptions bypass admission so crawls do not queue behind it.
+ */
+export async function register(
+  cache: KVNamespace, url: string, now = new Date(), maximum = 20,
+): Promise<SubscriptionEntry> {
+  const hash = await sha256Hex(url);
+  const existing = await getSubscription(cache, hash);
+  if (existing) return { ...existing, hash };
+
+  const previous = admissions.get(cache) ?? Promise.resolve();
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  admissions.set(cache, pending);
+  await previous;
+  try {
+    // Another admission may have registered this URL while we waited.
+    const registered = await getSubscription(cache, hash);
+    if (registered) return { ...registered, hash };
+    if ((await listSubscriptions(cache)).length >= maximum) {
+      throw new SubscriptionLimitError("Subscription limit reached");
+    }
+    const subscription = { url, registeredAt: now.toISOString(), lastSeenAt: now.toISOString() };
+    await putSubscription(cache, hash, subscription);
+    return { ...subscription, hash };
+  } finally {
+    release();
+    if (admissions.get(cache) === pending) admissions.delete(cache);
+  }
+}
+const admissions = new WeakMap<KVNamespace, Promise<void>>();
+
+/** Returns true only when a twelve-hour refresh was written; missing is a no-op. */
+export async function touch(cache: KVNamespace, hash: string, now = new Date()): Promise<boolean> {
+  const subscription = await getSubscription(cache, hash);
+  if (!subscription || now.getTime() - Date.parse(subscription.lastSeenAt) < TOUCH_INTERVAL_MS) return false;
+  await putSubscription(cache, hash, { ...subscription, lastSeenAt: now.toISOString() });
+  return true;
+}
+
+/** Idempotently delete a subscription. Expiration handles unattended feeds. */
+export async function remove(cache: KVNamespace, hash: string): Promise<void> {
+  await cache.delete(subscriptionKey(hash));
 }
