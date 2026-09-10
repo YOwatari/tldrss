@@ -31,3 +31,36 @@ export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE)
 export function summaryUnavailableText(language: DigestLanguage = DEFAULT_LANGUAGE): string {
   return TEXT[language].summaryUnavailable;
 }
+
+/**
+ * Name of the digest feed itself. Undated: the channel outlives any one day,
+ * and only the item title tells the reader which day it covers.
+ */
+export function channelTitleText(
+  feedTitle: string,
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
+  return language === "ja" ? `【日刊要約】${feedTitle}` : `Daily Digest: ${feedTitle}`;
+}
+
+/** `<description>` of the channel: what the feed is, in one line. */
+export function channelDescriptionText(
+  feedTitle: string,
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
+  return language === "ja"
+    ? `${feedTitle} の日刊要約`
+    : `Daily digest for ${feedTitle}`;
+}
+
+/**
+ * Title of the digest item, and with it the text Slack posts. It carries the
+ * day so that a reader listing several digests can tell them apart.
+ */
+export function itemTitleText(
+  feedTitle: string,
+  date: string,
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
+  return `${channelTitleText(feedTitle, language)} (${date})`;
+}

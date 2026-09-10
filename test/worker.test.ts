@@ -215,7 +215,7 @@ describe("GET /feed (cache miss)", () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(body).toContain('<rss version="2.0">');
+    expect(body).toContain('<rss version="2.0"');
     expect(body).not.toContain("<item>");
   });
 
@@ -298,6 +298,19 @@ describe("GET /feed (cache miss)", () => {
 
     const body = await digestOf({ ...bindings, AI: ai });
 
+    // Nothing to summarize, so nothing to post: Slack stays quiet.
+    expect(body).not.toContain("<item>");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("reports a quiet day when POST_NO_UPDATES asks it to", async () => {
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
+    stubFeedFetch(() => new Response(rssWithEntry(stale)));
+    const { ai, run } = stubAi();
+
+    const body = await digestOf({ ...bindings, AI: ai, POST_NO_UPDATES: "true" });
+
+    expect(body).toContain("<item>");
     expect(body).toContain("No new entries were published in the last 24 hours.");
     expect(run).not.toHaveBeenCalled();
   });
@@ -580,7 +593,10 @@ describe("GET /feed (language)", () => {
     stubFeedFetch(() => new Response(rssWithEntry(stale)));
     const { ai, run } = stubAi();
 
-    const body = await digestOf({ ...bindings, AI: ai }, `${WORKER_URL}&lang=ja`);
+    const body = await digestOf(
+      { ...bindings, AI: ai, POST_NO_UPDATES: "true" },
+      `${WORKER_URL}&lang=ja`,
+    );
 
     expect(body).toContain("24 時間以内に公開された新しいエントリはありません。");
     expect(run).not.toHaveBeenCalled();
@@ -625,7 +641,8 @@ describe("GET /feed (article links)", () => {
 
     const body = await digestOf({ ...bindings, AI: stubAi("[1] It shipped.").ai });
 
-    expect(body).toContain(`&lt;a href=&quot;${FEED_ORIGIN}/1&quot;&gt;Entry 1&lt;/a&gt;`);
+    // The body travels as CDATA, so the anchor reaches the reader as markup.
+    expect(body).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
     expect(body).toContain("It shipped.");
   });
 
@@ -674,7 +691,7 @@ describe("GET /feed (guid)", () => {
     const digest = await (await callWorker({ ...bindings, AI: stubAi().ai }, workerUrl)).text();
 
     for (const body of [placeholder, digest]) {
-      expect(body).toContain("<link>https://worker.example/feed</link>");
+      expect(body).toContain("<link>https://worker.example/</link>");
       expect(body).not.toContain("super-secret");
       expect(body).not.toContain("token=");
     }
@@ -709,5 +726,60 @@ describe("GET /feed (untitled entries)", () => {
 
     expect(body).toContain("(タイトルなし)");
     expect(body).not.toContain("(untitled)");
+  });
+});
+
+describe("GET /digest/{hash}/{date}", () => {
+  /** The address the digest item points readers at. */
+  function pageUrlOf(xml: string): string {
+    const link = /<item>[\s\S]*?<link>([^<]+)<\/link>/.exec(xml)?.[1];
+    if (!link) throw new Error("The digest carried no item link");
+    return link;
+  }
+
+  it("serves the full digest behind the link the item carries", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
+
+    const pageUrl = pageUrlOf(await digestOf(env));
+    const response = await callWorker(env, pageUrl);
+    const page = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(page).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
+    expect(page).toContain("It shipped.");
+  });
+
+  it("addresses the page by the feed hash, so the link carries no credentials", async () => {
+    const feedUrl = `${FEED_ORIGIN}/private.xml?token=secret`;
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
+
+    const pageUrl = pageUrlOf(
+      await digestOf(env, `https://worker.example/feed?url=${encodeURIComponent(feedUrl)}`),
+    );
+
+    expect(pageUrl).toContain(await sha256Hex(feedUrl));
+    expect(pageUrl).not.toContain("secret");
+  });
+
+  it("returns 404 for a digest that was never generated", async () => {
+    const response = await callWorker(
+      { ...bindings, AI: stubAi().ai },
+      `https://worker.example/digest/${"a".repeat(64)}/2026-09-10`,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("keeps no page for a day the feed published nothing", async () => {
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
+    stubFeedFetch(() => new Response(rssWithEntry(stale)));
+
+    await digestOf({ ...bindings, AI: stubAi().ai });
+
+    const listed = await bindings.DIGEST_CACHE.list({ prefix: "digest-html:" });
+    expect(listed.keys).toEqual([]);
   });
 });

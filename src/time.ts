@@ -12,3 +12,42 @@ export function jstDate(now: Date = new Date()): string {
 export function previousDate(date: string): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) - DAY_MS).toISOString().slice(0, 10);
 }
+
+/**
+ * The JST morning hour every digest is dated at. It is a property of the
+ * digest rather than of the schedule: generation runs earlier (and, on a cache
+ * miss, at whatever hour the crawl arrives), and the date must not move with it.
+ */
+const DIGEST_HOUR_JST = "09:00:00";
+
+const RFC822_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const RFC822_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * The `<pubDate>` of the digest covering `date`: 09:00:00 JST of that day, in
+ * the RFC 822 form RSS 2.0 asks for (`Thu, 10 Sep 2026 09:00:00 +0900`).
+ *
+ * A fixed hour rather than the generation time: readers sort and display by
+ * this field, so every day's digest reads as the morning edition it is rather
+ * than as published at whatever minute generation finished. It is formatted
+ * by hand because `toUTCString` would move the day back for anything before
+ * 09:00 JST.
+ */
+export function digestPubDate(date: string): string {
+  // Midnight UTC of the same calendar day, read back with the UTC getters, so
+  // the weekday named is the one of the JST day rather than of an instant.
+  const day = new Date(Date.parse(`${date}T00:00:00Z`));
+  if (Number.isNaN(day.getTime())) {
+    throw new Error(`Not a calendar date: ${date}`);
+  }
+
+  const weekday = RFC822_WEEKDAYS[day.getUTCDay()];
+  const dayOfMonth = String(day.getUTCDate()).padStart(2, "0");
+  const month = RFC822_MONTHS[day.getUTCMonth()];
+
+  return `${weekday}, ${dayOfMonth} ${month} ${day.getUTCFullYear()} ${DIGEST_HOUR_JST} +0900`;
+}
