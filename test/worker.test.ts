@@ -101,6 +101,38 @@ describe("routing", () => {
     expect(await response.text()).toContain("/feed?url=");
   });
 
+  it("returns 405 for a method the endpoint does not serve", async () => {
+    const { ai, run } = stubAi();
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request(WORKER_URL, { method: "POST" }),
+      { ...bindings, AI: ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    // A rejected method must not reach the feed or the model.
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("serves HEAD, which readers use to poll", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request(WORKER_URL, { method: "HEAD" }),
+      { ...bindings, AI: stubAi().ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    await expect(storedDigest()).resolves.not.toBeNull();
+  });
+
   it("returns 404 for any other path", async () => {
     const response = await callWorker(
       { ...bindings, AI: stubAi().ai },

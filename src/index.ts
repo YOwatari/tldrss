@@ -9,9 +9,19 @@ const USAGE = [
   "GET /feed?url=<feed url>[&lang=en|ja]",
 ].join("\n");
 
+/** Readers only ever read, and generation is too costly to let anyone POST. */
+const SERVED_METHODS = ["GET", "HEAD"];
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
+
+    if (!SERVED_METHODS.includes(request.method)) {
+      return new Response("Method not allowed", {
+        status: 405,
+        headers: { allow: SERVED_METHODS.join(", ") },
+      });
+    }
 
     if (pathname === "/feed") return handleFeed(request, env, ctx);
 
