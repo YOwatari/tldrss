@@ -315,6 +315,31 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
+  it("logs instead of rejecting when the lock cannot be written", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Reads still work, so the request path is unaffected; only the background
+    // task hits the failing write.
+    const failingCache = {
+      ...bindings.DIGEST_CACHE,
+      get: async () => null,
+      put: async () => {
+        throw new Error("KV unavailable");
+      },
+      delete: async () => {},
+    } as unknown as KVNamespace;
+
+    const response = await callWorker({
+      ...bindings,
+      DIGEST_CACHE: failingCache,
+      AI: stubAi().ai,
+    });
+
+    expect(response.status).toBe(200);
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it("does not log credentials carried in the feed url", async () => {
     const secretUrl = "https://source.example/rss.xml?token=super-secret";
     stubFeedFetch(() => new Response("<rss><channel>"));

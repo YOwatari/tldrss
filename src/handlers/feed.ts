@@ -121,18 +121,23 @@ async function generateDigest(
   feedUrl: URL,
   requestUrl: string,
 ): Promise<void> {
-  if (!(await acquireGenerationLock(env.DIGEST_CACHE, ref))) return;
-
+  // Nothing may escape: this promise is handed to `waitUntil`, where a
+  // rejection would be an unhandled one. KV itself can fail, so acquiring and
+  // releasing the lock are inside the guard too.
   try {
-    const digestXml = await buildDigest(env, ref, feedUrl, requestUrl);
-    await putDigest(env.DIGEST_CACHE, ref, digestXml);
+    if (!(await acquireGenerationLock(env.DIGEST_CACHE, ref))) return;
+
+    try {
+      const digestXml = await buildDigest(env, ref, feedUrl, requestUrl);
+      await putDigest(env.DIGEST_CACHE, ref, digestXml);
+    } finally {
+      await releaseGenerationLock(env.DIGEST_CACHE, ref);
+    }
   } catch (error) {
     // Private feed URLs carry credentials in the query string, so only the
     // origin and the error class are logged.
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`Failed to build digest for ${feedUrl.origin} (${kind})`);
-  } finally {
-    await releaseGenerationLock(env.DIGEST_CACHE, ref);
   }
 }
 
