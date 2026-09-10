@@ -11,7 +11,7 @@ import { DEFAULT_LANGUAGE } from "../digest/language";
 import { type Env, publicOriginOf } from "../env";
 import type { Summarizer } from "../llm/summarizer";
 import type { DigestRef } from "../store/digest-ref";
-import { listSubscriptions, type SubscriptionEntry } from "../store/subscriptions";
+import { getSubscription, listSubscriptions, remove, SUBSCRIPTION_TTL_SECONDS, type SubscriptionEntry } from "../store/subscriptions";
 import { jstDate } from "../time";
 
 /**
@@ -82,8 +82,8 @@ export async function handleScheduled(
     return logRun(trigger, { date, total: 0, ...tally, durationMs: Date.now() - startedAt });
   }
 
-  // KV expires subscriptions eight days after their last refresh, so listing
-  // automatically excludes feeds whose readers stopped crawling.
+  // TTL handles new records; legacy records without expiration also need
+  // lastSeenAt-based cleanup. Use the scheduled instant consistently.
   const subscriptions = await listSubscriptions(env.DIGEST_CACHE);
 
   await forEachConcurrently(subscriptions, CRON_CONCURRENCY, async (subscription) => {
@@ -91,6 +91,17 @@ export async function handleScheduled(
     // write, an unparseable stored url — must not cost the rest of the list
     // its digest.
     try {
+      if (isStale(subscription, scheduledAt)) {
+        // A crawl may have refreshed the record since listing. KV has no
+        // atomic conditional delete, but re-reading narrows that race.
+        const latest = await getSubscription(env.DIGEST_CACHE, subscription.hash);
+        if (!latest || isStale(latest, scheduledAt)) {
+          if (latest) await remove(env.DIGEST_CACHE, subscription.hash);
+          tally.skipped += 1;
+          return;
+        }
+        subscription = { ...latest, hash: subscription.hash };
+      }
       const outcome = await generateFor(env, summarizer, subscription, {
         date,
         origin,
@@ -114,6 +125,10 @@ export async function handleScheduled(
     ...tally,
     durationMs: Date.now() - startedAt,
   });
+}
+
+function isStale(subscription: { lastSeenAt: string }, now: Date): boolean {
+  return now.getTime() - Date.parse(subscription.lastSeenAt) >= SUBSCRIPTION_TTL_SECONDS * 1000;
 }
 
 function generateFor(
