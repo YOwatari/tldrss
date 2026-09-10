@@ -10,7 +10,6 @@ import type { DigestLinks } from "../digest/types";
 import { type Env, isFeedAllowed, maxSubscriptionsOf } from "../env";
 import { register, touch, SubscriptionLimitError } from "../store/subscriptions";
 import type { Summarizer } from "../llm/summarizer";
-import { sha256Hex } from "../hash";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
 import { jstDate, previousDate } from "../time";
@@ -85,19 +84,23 @@ export async function handleFeed(
     return new Response("Feed access forbidden", { status: 403 });
   }
 
+  let hash: string;
   try {
     const subscription = await register(env.DIGEST_CACHE, feedUrl.toString(), new Date(), maxSubscriptionsOf(env));
-    await touch(env.DIGEST_CACHE, subscription.hash);
+    hash = subscription.hash;
+    await touch(env.DIGEST_CACHE, hash);
   } catch (error) {
     if (error instanceof SubscriptionLimitError) {
       return new Response("Subscription limit reached", { status: 429 });
     }
-    console.error("Failed to persist subscription");
+    // Error messages may contain a private feed URL; log the error class only.
+    const kind = error instanceof Error ? error.name : typeof error;
+    console.error(`Failed to persist subscription (${kind})`);
     return new Response("Subscription storage unavailable", { status: 503 });
   }
 
   const ref: DigestRef = {
-    hash: await sha256Hex(feedUrl.toString()),
+    hash,
     date: jstDate(),
     language,
   };

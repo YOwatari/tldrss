@@ -85,3 +85,17 @@ it("uses the default cap of twenty when not configured", async () => {
   expect((await crawl()).status).toBe(429);
   expect(fetch).not.toHaveBeenCalled();
 });
+
+
+it("reports storage error types without leaking private feed credentials", async () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  const secretFeed = url + "?token=private-secret";
+  const cache = { async get() { throw new TypeError(`Cannot read ${secretFeed}`); } } as unknown as KVNamespace;
+  const response = await crawl({ DIGEST_CACHE: cache }, undefined, secretFeed);
+  expect(response.status).toBe(503);
+  expect(errors).toHaveBeenCalledWith("Failed to persist subscription (TypeError)");
+  expect(JSON.stringify(errors.mock.calls)).not.toContain("private-secret");
+  expect(fetch).not.toHaveBeenCalled();
+  expect(summarize).not.toHaveBeenCalled();
+});

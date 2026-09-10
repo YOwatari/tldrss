@@ -1,5 +1,5 @@
 import { env as providedEnv, reset } from "cloudflare:test";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   register, touch, remove, SUBSCRIPTION_TTL_SECONDS,
   listSubscriptions,
@@ -140,4 +140,61 @@ it("renews expiration on refresh and disappears from listing after eight idle da
   expect(await listSubscriptions(fake)).toHaveLength(1);
   clock++;
   expect(await listSubscriptions(fake)).toEqual([]);
+});
+
+
+it("serves existing subscriptions while a new admission is blocked on KV", async () => {
+  const existing = await register(kv, SUBSCRIPTION.url);
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const cache = {
+    get: kv.get.bind(kv),
+    put: kv.put.bind(kv),
+    list: async (options: KVNamespaceListOptions) => {
+      entered();
+      await gate;
+      return kv.list(options);
+    },
+  } as unknown as KVNamespace;
+  const admission = register(cache, "https://new.example/rss");
+  await started;
+  let served = false;
+  const crawl = register(cache, SUBSCRIPTION.url).then(entry => {
+    expect(entry).toEqual(existing);
+    served = true;
+  });
+  try {
+    await vi.waitFor(() => expect(served).toBe(true));
+  } finally {
+    release();
+    await Promise.all([admission, crawl]);
+  }
+});
+
+it("rechecks a missing record under the lock when the same URL is registered concurrently", async () => {
+  const records = new Map<string, string>();
+  let misses = 0;
+  let release!: () => void;
+  const bothRead = new Promise<void>(resolve => { release = resolve; });
+  const put = vi.fn(async (key: string, value: string) => { records.set(key, value); });
+  const cache = {
+    async get(key: string) {
+      if (++misses <= 2) {
+        if (misses === 2) release();
+        await bothRead;
+        return null;
+      }
+      return records.get(key) ?? null;
+    },
+    put,
+    async list() { return { list_complete: true, keys: [...records.keys()].map(name => ({ name })) }; },
+  } as unknown as KVNamespace;
+  const results = await Promise.all([
+    register(cache, SUBSCRIPTION.url, new Date(0), 1),
+    register(cache, SUBSCRIPTION.url, new Date(1000), 1),
+  ]);
+  expect(results[0]).toEqual(results[1]);
+  expect(put).toHaveBeenCalledTimes(1);
 });

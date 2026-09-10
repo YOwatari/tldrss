@@ -123,20 +123,25 @@ export async function getSubscription(cache: KVNamespace, hash: string): Promise
 /**
  * Register a normalized URL once; existing records retain both timestamps.
  * The cap applies only to new subscriptions. KV cannot enforce an atomic cap
- * across isolates; admission is serialized within this isolate.
+ * across isolates; new admissions are serialized within this isolate.
+ * Existing subscriptions bypass admission so crawls do not queue behind it.
  */
 export async function register(
   cache: KVNamespace, url: string, now = new Date(), maximum = 20,
 ): Promise<SubscriptionEntry> {
+  const hash = await sha256Hex(url);
+  const existing = await getSubscription(cache, hash);
+  if (existing) return { ...existing, hash };
+
   const previous = admissions.get(cache) ?? Promise.resolve();
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   admissions.set(cache, pending);
   await previous;
   try {
-    const hash = await sha256Hex(url);
-    const existing = await getSubscription(cache, hash);
-    if (existing) return { ...existing, hash };
+    // Another admission may have registered this URL while we waited.
+    const registered = await getSubscription(cache, hash);
+    if (registered) return { ...registered, hash };
     if ((await listSubscriptions(cache)).length >= maximum) {
       throw new SubscriptionLimitError("Subscription limit reached");
     }
