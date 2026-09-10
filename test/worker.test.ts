@@ -520,6 +520,20 @@ describe("GET /feed (guid)", () => {
     expect(english).toBeDefined();
     expect(english).not.toBe(japanese);
   });
+
+  it("does not carry the feed url, and its credentials, into the guid", async () => {
+    const secretUrl = "https://source.example/rss.xml?token=super-secret";
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await digestOf(
+      { ...bindings, AI: stubAi().ai },
+      `https://worker.example/feed?url=${encodeURIComponent(secretUrl)}`,
+    );
+
+    expect(guidOf(body)).toMatch(
+      new RegExp(`^${await sha256Hex(secretUrl)}-\\d{4}-\\d{2}-\\d{2}-en$`),
+    );
+  });
 });
 
 describe("GET /feed (untitled entries)", () => {

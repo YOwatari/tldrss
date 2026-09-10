@@ -171,7 +171,8 @@ async function buildDigest(
 
   return buildRssXml({
     requestUrl,
-    feedUrl: feedUrl.toString(),
+    feedHash: ref.hash,
+    digestDate: ref.date,
     feedTitle,
     // Reference markers are numbered against the same list the prompt used.
     summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries), ref.language),

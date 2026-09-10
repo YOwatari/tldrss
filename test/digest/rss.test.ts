@@ -5,7 +5,8 @@ describe("buildRssXml", () => {
   it("builds valid rss with one digest item", () => {
     const xml = buildRssXml({
       requestUrl: "https://worker.example/?url=https://source.example/rss.xml",
-      feedUrl: "https://source.example/rss.xml",
+      feedHash: "a".repeat(64),
+      digestDate: "2026-09-10",
       feedTitle: "Example Feed",
       summaryHtml: "Line 1<br />Line 2",
       language: "en",
@@ -20,7 +21,8 @@ describe("buildRssXml", () => {
   it("gives each language its own guid so readers do not merge the items", () => {
     const params = {
       requestUrl: "https://worker.example/",
-      feedUrl: "https://source.example/rss.xml",
+      feedHash: "a".repeat(64),
+      digestDate: "2026-09-10",
       feedTitle: "Example Feed",
       summaryHtml: "body",
       now: new Date("2026-09-10T12:00:00Z"),
@@ -33,10 +35,25 @@ describe("buildRssXml", () => {
     );
   });
 
+  it("identifies the item by the feed hash, not by the url it came from", () => {
+    const xml = buildRssXml({
+      requestUrl: "https://worker.example/feed",
+      feedHash: "a".repeat(64),
+      digestDate: "2026-09-10",
+      feedTitle: "Example Feed",
+      summaryHtml: "body",
+      language: "en",
+      now: new Date("2026-09-10T12:00:00Z"),
+    });
+
+    expect(xml).toContain(`<guid isPermaLink="false">${"a".repeat(64)}-2026-09-10-en</guid>`);
+  });
+
   it("escapes the html body so the reader receives markup, not tags", () => {
     const xml = buildRssXml({
       requestUrl: "https://worker.example/",
-      feedUrl: "https://source.example/rss.xml",
+      feedHash: "a".repeat(64),
+      digestDate: "2026-09-10",
       feedTitle: "Example Feed",
       summaryHtml: '* Something <a href="https://source.example/1">[1]</a>',
       language: "en",

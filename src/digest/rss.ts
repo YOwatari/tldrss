@@ -36,7 +36,10 @@ export function buildEmptyChannelXml(params: {
 
 export function buildRssXml(params: {
   requestUrl: string;
-  feedUrl: string;
+  /** `sha256Hex` of the feed url; identifies the feed without exposing it. */
+  feedHash: string;
+  /** JST day the digest covers, `YYYY-MM-DD`. */
+  digestDate: string;
   feedTitle: string;
   /** Digest body as an HTML fragment; see `renderDigestHtml`. */
   summaryHtml: string;
@@ -45,9 +48,11 @@ export function buildRssXml(params: {
 }): string {
   const now = params.now ?? new Date();
   const digestTitle = digestTitleOf(params.feedTitle);
+  // Built from the hash rather than the feed url: the guid travels to every
+  // reader, and a feed url can carry a token in its query string.
   // Readers deduplicate by guid, so the languages must not share one: two
   // subscriptions to the same feed would otherwise collapse into one item.
-  const digestGuid = `${params.feedUrl}#${now.toISOString().slice(0, 10)}#${params.language}`;
+  const digestGuid = `${params.feedHash}-${params.digestDate}-${params.language}`;
   // The body is HTML nested in an XML element, so it is escaped once more here.
   const description = escapeXml(params.summaryHtml);
 
