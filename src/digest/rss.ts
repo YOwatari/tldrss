@@ -1,4 +1,4 @@
-import type { DigestLanguage } from "./summarize";
+import type { DigestLanguage } from "./language";
 
 function escapeXml(text: string): string {
   return text

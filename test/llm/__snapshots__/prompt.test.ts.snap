@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prompt snapshots > matches the English prompt 1`] = `
+"Create a concise daily digest of the following RSS entries from "Example Feed".
+Open with a 2-3 sentence lead saying what the day was about, on its own line and without any number.
+Then write one bullet per entry: the 4-8 most notable ones, or every entry listed when fewer than four are available. Never cover the same entry twice.
+Write one line per bullet: the entry number in square brackets, then the summary, e.g. "[3] Adds a Rust query and covers Kotlin frameworks." Use only the numbers listed below.
+The reader already sees each title, so a bullet must add what the title leaves out — numbers, scope, or conditions taken from the excerpt. Never restate the title.
+Keep each bullet under 80 characters, factual and easy to scan.
+Use only the entries listed below. Never add information they do not carry, and never write a url of your own.
+Summarizing the 2 of 5 most recent entries.
+
+1. Entry 1
+URL: https://example.com/1
+Excerpt: Snippet 1
+2. (untitled)
+URL: https://example.com/2
+Excerpt: Body 2"
+`;
+
+exports[`prompt snapshots > matches the Japanese prompt 1`] = `
+"次の「Example Feed」の RSS エントリから、日次ダイジェストを作成してください。
+最初に、その日の全体像を 2〜3 文でまとめたリード文を書いてください。リード文は独立した行に書き、番号を付けないでください。
+続けて、エントリ 1 件につき 1 項目を書いてください。重要なものを 4〜8 件選び、エントリが 4 件未満のときは挙がっているものをすべて扱ってください。同じエントリを二度扱わないでください。
+各項目は 1 行で、エントリ番号を角かっこで囲んだあとに要約を続けてください。例:「[3] Rust のクエリが追加され、Kotlin のフレームワークも対象になった。」。番号は下のリストのものだけを使ってください。
+読者には見出しがそのまま表示されるので、各項目には見出しにない情報（数値・対象範囲・条件など）を本文から必ず 1 つ入れてください。見出しの言い換えにしないでください。
+各項目は 80 字以内で、事実に忠実に、ひと目で読める分量にしてください。
+下に挙げたエントリの情報だけを使ってください。書かれていない情報を補ったり、URL を自分で書いたりしないでください。
+エントリの原文が英語であっても、ダイジェストは日本語で書いてください。
+全 5 件のうち、新しい方から 2 件を対象とします。
+
+1. Entry 1
+URL: https://example.com/1
+Excerpt: Snippet 1
+2. (タイトルなし)
+URL: https://example.com/2
+Excerpt: Body 2"
+`;
+
+exports[`prompt snapshots > matches the system prompts 1`] = `
+{
+  "en": "You are an editor who writes short, factual daily digests of RSS feeds. Answer with the digest only, without preamble.",
+  "ja": "あなたは RSS フィードの日次ダイジェストを簡潔かつ事実に忠実にまとめる編集者です。前置きや後書きを付けず、ダイジェスト本文だけを日本語で出力してください。",
+}
+`;

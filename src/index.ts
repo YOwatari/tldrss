@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { handleFeed } from "./handlers/feed";
+import { createWorkersAiSummarizer } from "./llm/workers-ai";
 
 export type { Env };
 
@@ -31,7 +32,13 @@ export default {
       });
     }
 
-    if (pathname === "/feed") return handleFeed(request, env, ctx);
+    // The composition root is the only place that names a model provider;
+    // everything downstream sees a `Summarizer`.
+    if (pathname === "/feed") {
+      const summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
+
+      return handleFeed(request, env, ctx, summarizer);
+    }
 
     // Doubles as the health check: a plain 200 with no binding access.
     return new Response(USAGE, { headers: { "content-type": "text/plain; charset=utf-8" } });

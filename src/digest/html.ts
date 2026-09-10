@@ -1,9 +1,11 @@
+/**
+ * The digest body as an HTML fragment. Everything a reader sees is built here
+ * from the feed, so the model's answer only ever contributes prose.
+ */
 import type { FeedEntry } from "../feed/parse";
-import {
-  DEFAULT_LANGUAGE,
-  type DigestLanguage,
-  untitledEntryText,
-} from "./summarize";
+import { sanitizeLlmHtml } from "../llm/sanitize";
+import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
+import { summaryUnavailableText, untitledEntryText } from "./text";
 
 /**
  * `[3] Something happened.` — the shape each bullet of the model's answer is
@@ -56,12 +58,21 @@ function resolveBullets(
   return { lead, byEntry, sawBullet };
 }
 
-/** Last resort: the model's answer as-is, with line breaks preserved. */
-function renderRawText(summary: string): string {
-  return escapeHtml(summary)
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("<br />");
+/**
+ * Last resort: the model's own answer, reduced to markup a digest may carry.
+ *
+ * The prompt asks for plain lines, so this is usually just escaped text. A
+ * model that answers in html anyway is the reason it goes through the
+ * sanitizer rather than straight through `escapeHtml`. The entries are handed
+ * over with it so that a link in the answer survives only when the feed
+ * published it.
+ */
+function renderRawText(summary: string, entries: FeedEntry[]): string {
+  return sanitizeLlmHtml(summary, {
+    allowedHrefs: entries
+      .map((entry) => safeHref(entry.link))
+      .filter((link): link is string => link !== null),
+  });
 }
 
 /**
@@ -83,13 +94,17 @@ function safeHref(link: string | undefined): string | null {
   }
 }
 
-function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
+/** The entry's title, linked to the article when the feed gave a usable url. */
+function renderHeading(entry: FeedEntry, language: DigestLanguage): string {
   // Title and url come from the feed, never from the model.
   const title = escapeHtml(entry.title ?? untitledEntryText(language));
   const href = safeHref(entry.link);
-  const heading = href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
 
-  return `  <li>${heading}<br />${escapeHtml(summary)}</li>`;
+  return href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
+}
+
+function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
+  return `  <li>${renderHeading(entry, language)}<br />${escapeHtml(summary)}</li>`;
 }
 
 /**
@@ -105,7 +120,7 @@ export function renderDigestHtml(
   const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
 
   // The model ignored the format, or there was nothing to summarize at all.
-  if (!sawBullet) return renderRawText(summary);
+  if (!sawBullet) return renderRawText(summary, entries);
 
   const items = entries
     .map((entry, index) => {
@@ -116,10 +131,30 @@ export function renderDigestHtml(
 
   // Not one bullet resolved to an entry. Showing the model's own text keeps
   // something readable in the feed rather than an empty digest.
-  if (items.length === 0) return renderRawText(summary);
+  if (items.length === 0) return renderRawText(summary, entries);
 
   const paragraph =
     lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;
 
   return `${paragraph}<ul>\n${items.join("\n")}\n</ul>`;
+}
+
+/**
+ * The digest body served when no summary could be produced: a note saying so,
+ * then the day's entries as links.
+ *
+ * A subscription that goes silent on a model outage looks broken, and the
+ * titles and links alone are still worth delivering, so the digest degrades
+ * to this rather than to nothing.
+ */
+export function renderEntryListHtml(
+  entries: FeedEntry[],
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
+  const notice = `<p>${escapeHtml(summaryUnavailableText(language))}</p>`;
+  if (entries.length === 0) return notice;
+
+  const items = entries.map((entry) => `  <li>${renderHeading(entry, language)}</li>`);
+
+  return `${notice}\n<ul>\n${items.join("\n")}\n</ul>`;
 }

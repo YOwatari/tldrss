@@ -22,6 +22,16 @@ function rssWithEntry(pubDate: string): string {
   return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title><item><title>Entry 1</title><link>${FEED_ORIGIN}/1</link><pubDate>${pubDate}</pubDate><description>Hello</description></item></channel></rss>`;
 }
 
+function rssWithEntries(count: number, pubDate: string): string {
+  const items = Array.from(
+    { length: count },
+    (_, index) =>
+      `<item><title>Entry ${index + 1}</title><link>${FEED_ORIGIN}/${index + 1}</link><pubDate>${pubDate}</pubDate><description>Body ${index + 1}</description></item>`,
+  ).join("");
+
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title>${items}</channel></rss>`;
+}
+
 function atomWithEntry(updated: string): string {
   return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Atom Feed</title><entry><title>Atom Entry</title><link rel="alternate" href="${FEED_ORIGIN}/atom-1"/><updated>${updated}</updated><summary>Atom summary</summary></entry></feed>`;
 }
@@ -293,6 +303,21 @@ describe("GET /feed (cache miss)", () => {
   });
 });
 
+describe("GET /feed (entry cap)", () => {
+  it("summarizes at most MAX_ENTRIES entries and says how many were dropped", async () => {
+    stubFeedFetch(() => new Response(rssWithEntries(4, hourAgo().toUTCString())));
+    const { ai, run } = stubAi("- [1] first");
+
+    await callWorker({ ...bindings, AI: ai, MAX_ENTRIES: "2" });
+
+    const prompt = run.mock.calls[0][1].messages[1].content;
+    expect(prompt).toContain("1. Entry 1");
+    expect(prompt).toContain("2. Entry 2");
+    expect(prompt).not.toContain("3. Entry 3");
+    expect(prompt).toContain("2 of 4");
+  });
+});
+
 describe("GET /feed (cache hit)", () => {
   it("serves the cached digest without hitting the feed or the model again", async () => {
     const calls = stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
@@ -405,12 +430,46 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
-  it("serves 200 and stores nothing when the model call fails", async () => {
+  it("falls back to a list of the day's entries when the model call fails", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
+    const modelError = new Error("model unavailable");
+    const run = vi.fn().mockRejectedValue(modelError);
 
     const response = await callWorker({ ...bindings, AI: { run } as unknown as Ai });
+
+    // The first request predates the digest, so the fallback shows up in KV.
+    expect(response.status).toBe(200);
+    const stored = await storedDigest();
+    expect(stored?.value).toContain("A summary could not be generated");
+    expect(stored?.value).toContain(`${FEED_ORIGIN}/1`);
+    expect(stored?.value).toContain("Entry 1");
+    // Triage needs to tell a timeout from an unusable answer, so the error
+    // itself is logged, not just its class.
+    expect(errors).toHaveBeenCalledWith(expect.any(String), modelError);
+    errors.mockRestore();
+  });
+
+  it("falls back when nothing of the model's answer survives sanitizing", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Non-blank, so the summarizer accepts it, yet it renders as nothing.
+    const { ai } = stubAi("<script>alert(1)</script>");
+
+    await callWorker({ ...bindings, AI: ai });
+
+    const stored = await storedDigest();
+    expect(stored?.value).toContain("A summary could not be generated");
+    expect(stored?.value).toContain("Entry 1");
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("stores nothing when the feed itself cannot be read", async () => {
+    stubFeedFetch(() => new Response("nope", { status: 500 }));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(200);
     expect(await response.text()).not.toContain("<item>");
@@ -419,11 +478,14 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
-  it("retries the model call on the next request after it failed", async () => {
+  it("does not call the model again once a fallback digest is stored", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Both attempts of the first request fail; see `workers-ai.ts` for the
+    // in-request retry.
     const run = vi
       .fn()
+      .mockRejectedValueOnce(new Error("model unavailable"))
       .mockRejectedValueOnce(new Error("model unavailable"))
       .mockResolvedValue({ response: "- summary" });
     const env = { ...bindings, AI: { run } as unknown as Ai };
@@ -431,9 +493,11 @@ describe("GET /feed (upstream failures)", () => {
     await callWorker(env);
     await callWorker(env);
 
+    // The fallback digest fills today's slot, so the second request is a cache
+    // hit and the model is left alone until tomorrow.
     expect(run).toHaveBeenCalledTimes(2);
     await expect(storedDigest()).resolves.toMatchObject({
-      value: expect.stringContaining("- summary"),
+      value: expect.stringContaining("A summary could not be generated"),
     });
     errors.mockRestore();
   });

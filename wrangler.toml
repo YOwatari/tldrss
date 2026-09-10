@@ -11,3 +11,5 @@ binding = "AI"
 
 [vars]
 AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+# Entries per digest. Bounds the prompt, and with it the cost of one digest.
+MAX_ENTRIES = "30"

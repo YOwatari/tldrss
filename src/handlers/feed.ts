@@ -1,15 +1,16 @@
-import { renderDigestHtml } from "../digest/references";
-import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
 import {
   DEFAULT_LANGUAGE,
+  DIGEST_LANGUAGES,
   type DigestLanguage,
-  noRecentEntriesText,
-  selectPromptEntries,
-  summarizeEntries,
-} from "../digest/summarize";
-import type { Env } from "../env";
-import { filterEntriesFromLast24Hours } from "../feed/filter";
+  isDigestLanguage,
+} from "../digest/language";
+import { renderDigestHtml, renderEntryListHtml } from "../digest/html";
+import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
+import { noRecentEntriesText } from "../digest/text";
+import { type Env, maxEntriesOf } from "../env";
 import { parseFeed } from "../feed/parse";
+import { type EntrySelection, selectRecentEntries } from "../feed/select";
+import type { Summarizer } from "../llm/summarizer";
 import { sha256Hex } from "../hash";
 import { getDigest, putDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
@@ -24,16 +25,6 @@ const XML_HEADERS = {
   "content-type": "application/xml; charset=utf-8",
   "cache-control": "public, max-age=300",
 };
-
-/**
- * Languages accepted in the `lang` query parameter. The default is listed too,
- * so a reader can pin the language explicitly instead of relying on the default.
- */
-const REQUESTABLE_LANGUAGES = ["en", "ja"] as const satisfies readonly DigestLanguage[];
-
-function isRequestableLanguage(value: string): value is (typeof REQUESTABLE_LANGUAGES)[number] {
-  return (REQUESTABLE_LANGUAGES as readonly string[]).includes(value);
-}
 
 function xmlResponse(xml: string): Response {
   return new Response(xml, { headers: XML_HEADERS });
@@ -58,11 +49,18 @@ function normalizeFeedUrl(raw: string): URL | null {
   return url;
 }
 
-/** GET /feed?url=<feed>&lang=<en|ja> */
+/**
+ * GET /feed?url=<feed>&lang=<en|ja>
+ *
+ * The summarizer is passed in rather than built here: which model answers is
+ * a decision for the composition root (`index.ts`), and a test can summarize
+ * without one.
+ */
 export async function handleFeed(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
+  summarizer: Summarizer,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
 
@@ -77,9 +75,9 @@ export async function handleFeed(
   }
 
   const requestedLanguage = requestUrl.searchParams.get("lang");
-  if (requestedLanguage !== null && !isRequestableLanguage(requestedLanguage)) {
+  if (requestedLanguage !== null && !isDigestLanguage(requestedLanguage)) {
     return new Response(
-      `Unsupported lang query parameter. Supported: ${REQUESTABLE_LANGUAGES.join(", ")}`,
+      `Unsupported lang query parameter. Supported: ${DIGEST_LANGUAGES.join(", ")}`,
       { status: 400 },
     );
   }
@@ -101,7 +99,7 @@ export async function handleFeed(
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateDigest(env, ref, feedUrl, publicUrl));
+  ctx.waitUntil(generateDigest(env, summarizer, ref, feedUrl, publicUrl));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -115,12 +113,55 @@ export async function handleFeed(
 }
 
 /**
+ * The digest body: the model's summary, or the day's entries as bare links
+ * when summarizing failed.
+ *
+ * Only the summary is given up on. Titles and links are already in hand, and
+ * a reader whose subscription goes silent on a model outage has no way to tell
+ * that from a broken feed. The fallback is then cached like any other digest,
+ * so a failure costs the day its summary rather than triggering a retry on
+ * every crawl.
+ */
+async function summarizeOrList(
+  summarizer: Summarizer,
+  selection: EntrySelection,
+  feedTitle: string,
+  language: DigestLanguage,
+): Promise<string> {
+  try {
+    const summary = await summarizer.summarize({
+      feedTitle,
+      entries: selection.entries,
+      availableCount: selection.availableCount,
+      language,
+    });
+
+    // Reference markers are numbered against the list the prompt used.
+    const html = renderDigestHtml(summary, selection.entries, language);
+    // An answer can be non-blank and still leave nothing behind — markup the
+    // sanitizer drops whole, say. An empty body is worse for a reader than the
+    // entry list, so it is treated as a failure to summarize.
+    if (html.trim() === "") throw new Error("Digest body was empty after rendering");
+
+    return html;
+  } catch (error) {
+    // Unlike the failure logged in `generateDigest`, this one comes from the
+    // model rather than from the feed url, so it carries no credentials and is
+    // logged whole: a timeout and an unusable answer need telling apart.
+    console.error(`Failed to summarize ${selection.entries.length} entries`, error);
+
+    return renderEntryListHtml(selection.entries, language);
+  }
+}
+
+/**
  * Fetches, summarizes and stores one digest. Runs outside the response, so
  * every failure is logged rather than surfaced: the reader has already been
  * served yesterday's digest or an empty channel.
  */
 async function generateDigest(
   env: Env,
+  summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
   publicUrl: string,
@@ -133,7 +174,7 @@ async function generateDigest(
     if (!lockToken) return;
 
     try {
-      const digestXml = await buildDigest(env, ref, feedUrl, publicUrl);
+      const digestXml = await buildDigest(env, summarizer, ref, feedUrl, publicUrl);
       await putDigest(env.DIGEST_CACHE, ref, digestXml);
     } finally {
       await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
@@ -148,6 +189,7 @@ async function generateDigest(
 
 async function buildDigest(
   env: Env,
+  summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
   publicUrl: string,
@@ -158,27 +200,20 @@ async function buildDigest(
   }
 
   const feed = parseFeed(await feedResponse.text());
-  const recentEntries = filterEntriesFromLast24Hours(feed.items);
   const feedTitle = feed.title ?? feedUrl.host;
+  const selection = selectRecentEntries(feed.items, { maxEntries: maxEntriesOf(env) });
 
-  const summary =
-    recentEntries.length === 0
-      ? noRecentEntriesText(ref.language)
-      : await summarizeEntries({
-          ai: env.AI,
-          model: env.AI_MODEL,
-          feedTitle,
-          entries: recentEntries,
-          language: ref.language,
-        });
+  const summaryHtml =
+    selection.entries.length === 0
+      ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
+      : await summarizeOrList(summarizer, selection, feedTitle, ref.language);
 
   return buildRssXml({
     publicUrl,
     feedHash: ref.hash,
     digestDate: ref.date,
     feedTitle,
-    // Reference markers are numbered against the same list the prompt used.
-    summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries), ref.language),
+    summaryHtml,
     language: ref.language,
   });
 }

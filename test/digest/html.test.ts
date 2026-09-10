@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderDigestHtml } from "../../src/digest/references";
+import { renderDigestHtml, renderEntryListHtml } from "../../src/digest/html";
 
 const entries = [
   { title: "First article", link: "https://example.com/1" },
@@ -58,6 +58,45 @@ describe("renderDigestHtml", () => {
     const html = renderDigestHtml("No new entries were published.", entries);
 
     expect(html).toBe("No new entries were published.");
+  });
+
+  it("keeps the allowed markup of a model that answered in html", () => {
+    const html = renderDigestHtml("<p>Lead.</p><ul><li>One</li></ul>", entries);
+
+    expect(html).toBe("<p>Lead.</p><ul><li>One</li></ul>");
+  });
+
+  it("keeps a link of a model that answered in html when the feed published it", () => {
+    const html = renderDigestHtml(
+      '<p><a href="https://example.com/1">First article</a></p>',
+      entries,
+    );
+
+    expect(html).toBe('<p><a href="https://example.com/1">First article</a></p>');
+  });
+
+  // The model is prompted with feed text, so a url in its answer is not
+  // evidence that the feed published it.
+  it("refuses a link a model invented", () => {
+    const html = renderDigestHtml(
+      '<p><a href="https://phishing.example/pay">Claim your prize</a></p>',
+      entries,
+    );
+
+    expect(html).toBe("<p><a>Claim your prize</a></p>");
+  });
+
+  it("sanitizes the markup of a model that answered in html", () => {
+    const html = renderDigestHtml(
+      '```html\n<p onclick="steal()">Lead.</p><script>alert(1)</script>\n```',
+      entries,
+    );
+
+    expect(html).toBe("<p>Lead.</p>");
+  });
+
+  it("keeps the line breaks of a plain-text answer", () => {
+    expect(renderDigestHtml("first\nsecond", entries)).toBe("first<br />second");
   });
 
   it("escapes html from the model and from the feed", () => {
@@ -159,5 +198,46 @@ describe("renderDigestHtml (lead)", () => {
 
     expect(html).not.toContain("<script>");
     expect(html).toContain("<p>&lt;script&gt;x&lt;/script&gt;</p>");
+  });
+});
+
+describe("renderEntryListHtml", () => {
+  const entries = [
+    { title: "First article", link: "https://example.com/1" },
+    { title: "Second article", link: "https://example.com/2" },
+  ];
+
+  it("says why the summary is missing and lists every entry as a link", () => {
+    const html = renderEntryListHtml(entries);
+
+    expect(html).toContain("<p>A summary could not be generated");
+    expect(html).toContain('<li><a href="https://example.com/1">First article</a></li>');
+    expect(html).toContain('<li><a href="https://example.com/2">Second article</a></li>');
+  });
+
+  it("writes the notice in Japanese for a Japanese digest", () => {
+    expect(renderEntryListHtml(entries, "ja")).toContain("要約を生成できませんでした");
+  });
+
+  it("keeps an entry the feed gave no link as plain text", () => {
+    expect(renderEntryListHtml([{ title: "No link" }])).toContain("<li>No link</li>");
+  });
+
+  it("labels an entry the feed gave no title", () => {
+    expect(renderEntryListHtml([{ link: "https://example.com/1" }])).toContain("(untitled)");
+  });
+
+  it("escapes a hostile title and refuses a hostile link", () => {
+    const html = renderEntryListHtml([
+      { title: "<script>alert(1)</script>", link: "javascript:alert(1)" },
+    ]);
+
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("renders the notice alone when there is nothing to list", () => {
+    expect(renderEntryListHtml([])).not.toContain("<ul>");
   });
 });
