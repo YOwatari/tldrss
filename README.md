@@ -3,8 +3,18 @@ A daily RSS digest proxy on Cloudflare Workers.
 
 ## Usage
 - Request: `/?url=https://example.com/rss.xml`
-- The worker fetches the target feed (RSS 2.0 or Atom), keeps entries from the last 24 hours, summarizes them with Gemini (`gemini-2.5-flash`), and returns a single-item RSS 2.0 digest.
-- Digest XML is cached in Workers KV (`DIGEST_CACHE`) to reduce repeated LLM/API work.
+- The worker fetches the target feed (RSS 2.0 or Atom), keeps entries from the last 24 hours, summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
+- Digest XML is cached in Workers KV (`DIGEST_CACHE`) to reduce repeated inference.
+
+## Bindings
+| Binding | Kind | Purpose |
+| --- | --- | --- |
+| `DIGEST_CACHE` | KV namespace | Caches the generated digest for an hour |
+| `AI` | Workers AI | Runs the summarization model |
+| `AI_MODEL` | var | Model id (default: `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
+
+No API key is needed: Workers AI is billed through the account that owns the worker.
+Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://developers.cloudflare.com/workers-ai/models/).
 
 ## Setup
 
@@ -12,29 +22,14 @@ A daily RSS digest proxy on Cloudflare Workers.
 npm ci
 ```
 
-### Secrets
-`GEMINI_API_KEY` is a secret and is not stored in `wrangler.toml`. Register it once per environment:
-
-```sh
-npx wrangler secret put GEMINI_API_KEY
-```
-
-For local development, put it in `.dev.vars` (git-ignored):
-
-```
-GEMINI_API_KEY=your-key
-```
-
-The model is a plain variable (`GEMINI_MODEL` in `wrangler.toml`) and can be overridden per environment.
-
 ## Development
 
 ```sh
-npm run dev        # wrangler dev (local)
+npm run dev        # wrangler dev (Workers AI runs remotely, so `wrangler login` is required)
 npm test           # vitest on the Workers runtime (workerd)
 npm run typecheck  # tsc --noEmit
 npm run build      # wrangler deploy --dry-run
 ```
 
-Tests run inside workerd via `@cloudflare/vitest-pool-workers`, using Miniflare's real KV binding and
-a declarative mock (`fetchMock`) for outbound requests.
+Tests run inside workerd via `@cloudflare/vitest-pool-workers`, using Miniflare's real KV binding.
+Workers AI has no local emulation, so tests inject a stub `AI` binding and `remoteBindings` is off.
