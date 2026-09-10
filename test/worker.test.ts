@@ -143,6 +143,16 @@ describe("worker fetch", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("returns 502 when the feed body is not parsable xml", async () => {
+    stubFeedFetch(() => new Response("<rss><channel>"));
+    const { ai, run } = stubAi();
+
+    const response = await callWorker({ ...bindings, AI: ai });
+
+    expect(response.status).toBe(502);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("returns 502 when the upstream feed fails", async () => {
     stubFeedFetch(() => new Response("boom", { status: 500 }));
 

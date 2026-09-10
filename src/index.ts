@@ -1,7 +1,7 @@
 import { buildRssXml } from "./digest/rss";
 import { summarizeEntries } from "./digest/summarize";
 import { filterEntriesFromLast24Hours } from "./feed/filter";
-import { parseFeed } from "./feed/parse";
+import { type ParsedFeed, parseFeed } from "./feed/parse";
 
 export type Env = {
   DIGEST_CACHE: KVNamespace;
@@ -46,8 +46,15 @@ export default {
       return new Response(`Failed to fetch feed: ${feedResponse.status}`, { status: 502 });
     }
 
-    const xml = await feedResponse.text();
-    const feed = parseFeed(xml);
+    let feed: ParsedFeed;
+    try {
+      feed = parseFeed(await feedResponse.text());
+    } catch (error) {
+      // A malformed body is an upstream problem, so report it like a failed fetch.
+      console.error("Failed to parse feed", parsedFeedUrl.toString(), error);
+      return new Response("Failed to parse feed", { status: 502 });
+    }
+
     const recentEntries = filterEntriesFromLast24Hours(feed.items);
 
     const feedTitle = feed.title ?? parsedFeedUrl.host;
