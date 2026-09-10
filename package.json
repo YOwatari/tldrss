@@ -26,6 +26,7 @@
   },
   "type": "module",
   "dependencies": {
-    "fast-xml-parser": "^5.11.1"
+    "fast-xml-parser": "^5.11.1",
+    "html-entities": "^2.6.0"
   }
 }
