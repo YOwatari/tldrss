@@ -51,6 +51,14 @@ function resolveBullets(
   return { lead, byEntry, sawBullet };
 }
 
+/** Last resort: the model's answer as-is, with line breaks preserved. */
+function renderRawText(summary: string): string {
+  return escapeHtml(summary)
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("<br />");
+}
+
 function renderItem(entry: FeedEntry, summary: string): string {
   // Title and url come from the feed, never from the model.
   const title = escapeHtml(entry.title ?? "(untitled)");
@@ -68,12 +76,7 @@ export function renderDigestHtml(summary: string, entries: FeedEntry[]): string 
   const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
 
   // The model ignored the format, or there was nothing to summarize at all.
-  if (!sawBullet) {
-    return escapeHtml(summary)
-      .split("\n")
-      .map((line) => line.trimEnd())
-      .join("<br />");
-  }
+  if (!sawBullet) return renderRawText(summary);
 
   const items = entries
     .map((entry, index) => {
@@ -82,8 +85,9 @@ export function renderDigestHtml(summary: string, entries: FeedEntry[]): string 
     })
     .filter((item) => item !== null);
 
-  // Every bullet cited an entry that does not exist; nothing can be shown.
-  if (items.length === 0) return "";
+  // Not one bullet resolved to an entry. Showing the model's own text keeps
+  // something readable in the feed rather than an empty digest.
+  if (items.length === 0) return renderRawText(summary);
 
   const paragraph =
     lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;

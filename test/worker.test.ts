@@ -249,9 +249,20 @@ describe("worker fetch (article links)", () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
 
     const body = await (
-      await callWorker({ ...bindings, AI: stubAi("[7] It shipped.").ai })
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.\n[7] Invented.").ai })
     ).text();
 
-    expect(body).not.toContain("It shipped.");
+    expect(body).toContain("It shipped.");
+    expect(body).not.toContain("Invented.");
+  });
+
+  it("keeps the model's text rather than serving an empty digest", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[7] Invented.").ai })
+    ).text();
+
+    expect(body).toContain("Invented.");
   });
 });

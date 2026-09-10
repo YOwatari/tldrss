@@ -35,8 +35,16 @@ describe("renderDigestHtml", () => {
     expect(html).not.toContain("<a href");
   });
 
-  it("ignores numbers pointing outside the entry list", () => {
-    expect(renderDigestHtml("[9] Invented.", entries)).not.toContain("Invented.");
+  it("ignores a number pointing outside the entry list", () => {
+    const html = renderDigestHtml("[1] It shipped.\n[9] Invented.", entries);
+
+    expect(html).toContain("It shipped.");
+    expect(html).not.toContain("Invented.");
+  });
+
+  it("falls back to the raw text when no bullet resolves to an entry", () => {
+    // An empty digest would be worse than showing what the model wrote.
+    expect(renderDigestHtml("[9] Invented.", entries)).toBe("[9] Invented.");
   });
 
   it("keeps only the first bullet when the model repeats an entry", () => {
