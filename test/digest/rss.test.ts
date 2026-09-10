@@ -1,19 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRssXml, filterEntriesFromLast24Hours } from "../src/rss";
-
-describe("filterEntriesFromLast24Hours", () => {
-  it("keeps only entries inside the 24-hour window", () => {
-    const now = new Date("2026-09-10T12:00:00Z");
-    const entries = [
-      { title: "fresh", isoDate: "2026-09-10T10:00:00Z" },
-      { title: "old", isoDate: "2026-09-09T11:59:59Z" },
-      { title: "missing" },
-    ];
-
-    const filtered = filterEntriesFromLast24Hours(entries, now);
-    expect(filtered.map((entry) => entry.title)).toEqual(["fresh"]);
-  });
-});
+import { buildDigestPrompt, buildRssXml } from "../../src/digest/rss";
 
 describe("buildRssXml", () => {
   it("builds valid rss with one digest item", () => {
@@ -29,5 +15,18 @@ describe("buildRssXml", () => {
     expect(xml.match(/<item>/g)?.length).toBe(1);
     expect(xml).toContain("Line 1&#10;Line 2");
     expect(xml).toContain("Daily Digest: Example Feed");
+  });
+});
+
+describe("buildDigestPrompt", () => {
+  it("lists every entry with title, url and excerpt", () => {
+    const prompt = buildDigestPrompt("Example Feed", [
+      { title: "Entry 1", link: "https://example.com/1", contentSnippet: "Snippet 1" },
+      { link: "https://example.com/2", content: "Body 2" },
+    ]);
+
+    expect(prompt).toContain("Example Feed");
+    expect(prompt).toContain("1. Entry 1\nURL: https://example.com/1\nExcerpt: Snippet 1");
+    expect(prompt).toContain("2. (untitled)\nURL: https://example.com/2\nExcerpt: Body 2");
   });
 });

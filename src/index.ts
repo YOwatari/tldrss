@@ -1,11 +1,8 @@
-import {
-  buildDigestPrompt,
-  buildRssXml,
-  filterEntriesFromLast24Hours,
-  parseFeed,
-} from "./rss";
+import { buildDigestPrompt, buildRssXml } from "./digest/rss";
+import { filterEntriesFromLast24Hours } from "./feed/filter";
+import { parseFeed } from "./feed/parse";
 
-type Env = {
+export type Env = {
   DIGEST_CACHE: KVNamespace;
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
@@ -72,7 +69,7 @@ export default {
     }
 
     const xml = await feedResponse.text();
-    const feed = await parseFeed(xml);
+    const feed = parseFeed(xml);
     const recentEntries = filterEntriesFromLast24Hours(feed.items);
 
     const summary =

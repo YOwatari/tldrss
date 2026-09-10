@@ -1,44 +1,4 @@
-import Parser from "rss-parser";
-
-export type FeedEntry = {
-  title?: string;
-  link?: string;
-  contentSnippet?: string;
-  content?: string;
-  pubDate?: string;
-  isoDate?: string;
-};
-
-export type ParsedFeed = {
-  title?: string;
-  link?: string;
-  items: FeedEntry[];
-};
-
-const parser = new Parser<unknown, FeedEntry>();
-
-export async function parseFeed(xml: string): Promise<ParsedFeed> {
-  const feed = await parser.parseString(xml);
-  return {
-    title: feed.title,
-    link: feed.link,
-    items: feed.items ?? [],
-  };
-}
-
-export function filterEntriesFromLast24Hours(
-  entries: FeedEntry[],
-  now: Date = new Date(),
-): FeedEntry[] {
-  const cutoff = now.getTime() - 24 * 60 * 60 * 1000;
-
-  return entries.filter((entry) => {
-    const dateText = entry.isoDate ?? entry.pubDate;
-    if (!dateText) return false;
-    const publishedAt = Date.parse(dateText);
-    return Number.isFinite(publishedAt) && publishedAt >= cutoff && publishedAt <= now.getTime();
-  });
-}
+import type { FeedEntry } from "../feed/parse";
 
 export function buildDigestPrompt(feedTitle: string, entries: FeedEntry[]): string {
   const lines = entries.map((entry, index) => {
