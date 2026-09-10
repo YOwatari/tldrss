@@ -4,7 +4,8 @@ A daily RSS digest proxy on Cloudflare Workers.
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
 - `/` answers with usage instructions and doubles as a health check; any other path is a 404.
-- The worker fetches the target feed (RSS 2.0 or Atom), keeps entries from the last 24 hours, summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
+- The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
+- Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
 - Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails.
 
 ### Response timing
@@ -14,6 +15,8 @@ Feed readers time out quickly, so `/feed` never generates a digest inside the re
 2. Otherwise yesterday's digest is served, and today's is generated in the background.
 3. When neither exists, a valid RSS 2.0 channel with no `<item>` is returned immediately and the digest is generated in the background.
 
+When the model cannot be reached, the digest degrades to the day's titles and links instead of disappearing, and that fallback is cached like any other digest — a model outage costs the day its summary rather than causing a retry on every crawl.
+
 Upstream and model failures are logged and answered with 200, never with an error status, so a reader does not show the subscription as broken. A `generating:{...}` key (TTL 5 minutes) makes concurrent requests unlikely to generate the same digest twice; KV has no compare-and-set and is only eventually consistent across isolates, so this reduces duplicate work rather than ruling it out.
 
 ## Bindings
@@ -21,10 +24,16 @@ Upstream and model failures are logged and answered with 200, never with an erro
 | --- | --- | --- |
 | `DIGEST_CACHE` | KV namespace | Caches the generated digest for 48 hours |
 | `AI` | Workers AI | Runs the summarization model |
-| `AI_MODEL` | var | Model id (default: `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
+| `AI_MODEL` | var | Model id (default: `@cf/meta/llama-4-scout-17b-16e-instruct`) |
+| `MAX_ENTRIES` | var | Entries per digest (default: 30, capped at 100) |
 
 No API key is needed: Workers AI is billed through the account that owns the worker.
 Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://developers.cloudflare.com/workers-ai/models/).
+
+## Digest body
+The model is asked for a lead paragraph and one plain-text bullet per entry, each citing an entry number. The worker builds the HTML itself from those numbers, so every title and link a reader sees comes from the feed rather than from the model. An answer that ignores the format is passed through `llm/sanitize.ts` instead, which keeps only `<p> <h3> <ul> <li> <a> <strong> <br>`, drops every attribute but an `http(s)` `href`, and balances what the model left open.
+
+Swapping the model provider means implementing `Summarizer` (`src/llm/summarizer.ts`); nothing outside `src/llm/` knows which one is in use.
 
 ## Setup
 

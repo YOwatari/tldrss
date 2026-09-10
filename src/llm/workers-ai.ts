@@ -67,9 +67,9 @@ export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): S
 
   return {
     async summarize(input: DigestInput): Promise<string> {
-      let lastError: unknown;
+      let lastError: unknown = new Error("Workers AI was never called");
 
-      for (let remaining = MAX_ATTEMPTS; remaining > 0; remaining--) {
+      for (let tries = 0; tries < MAX_ATTEMPTS; tries++) {
         try {
           return await attempt(input);
         } catch (error) {
