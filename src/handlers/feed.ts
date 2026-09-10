@@ -135,8 +135,10 @@ async function summarizeOrList(
     // Reference markers are numbered against the list the prompt used.
     return renderDigestHtml(summary, selection.entries, language);
   } catch (error) {
-    const kind = error instanceof Error ? error.name : typeof error;
-    console.error(`Failed to summarize ${selection.entries.length} entries (${kind})`);
+    // Unlike the failure logged in `generateDigest`, this one comes from the
+    // model rather than from the feed url, so it carries no credentials and is
+    // logged whole: a timeout and an unusable answer need telling apart.
+    console.error(`Failed to summarize ${selection.entries.length} entries`, error);
 
     return renderEntryListHtml(selection.entries, language);
   }

@@ -433,7 +433,8 @@ describe("GET /feed (upstream failures)", () => {
   it("falls back to a list of the day's entries when the model call fails", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
+    const modelError = new Error("model unavailable");
+    const run = vi.fn().mockRejectedValue(modelError);
 
     const response = await callWorker({ ...bindings, AI: { run } as unknown as Ai });
 
@@ -443,7 +444,9 @@ describe("GET /feed (upstream failures)", () => {
     expect(stored?.value).toContain("A summary could not be generated");
     expect(stored?.value).toContain(`${FEED_ORIGIN}/1`);
     expect(stored?.value).toContain("Entry 1");
-    expect(errors).toHaveBeenCalled();
+    // Triage needs to tell a timeout from an unusable answer, so the error
+    // itself is logged, not just its class.
+    expect(errors).toHaveBeenCalledWith(expect.any(String), modelError);
     errors.mockRestore();
   });
 
