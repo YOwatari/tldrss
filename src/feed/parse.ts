@@ -155,11 +155,17 @@ function extractLink(nodes: OrderedNode[], preferredPrefix = ""): string | undef
 /**
  * Only markup-shaped constructs are stripped: entities are already decoded by
  * this point, so plain text such as "1 < 2 and 3 > 1" must survive intact.
+ * Block-level tags become a space (they separate words); inline tags are removed
+ * outright, so `<p>Git<b>Hub</b>!</p>` stays "GitHub!".
  */
-const HTML_TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
+const BLOCK_TAG =
+  /<\/?(?:address|article|aside|blockquote|br|dd|div|dl|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^<>]*>/gi;
+const INLINE_TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
 
 function stripHtml(html: string): string {
-  return normalizeText(html.replaceAll(HTML_TAG, " ").replaceAll(/&nbsp;/g, " "));
+  return normalizeText(
+    html.replaceAll(BLOCK_TAG, " ").replaceAll(INLINE_TAG, "").replaceAll(/&nbsp;/g, " "),
+  );
 }
 
 function toIsoDate(dateText: string | undefined): string | undefined {

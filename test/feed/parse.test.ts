@@ -243,6 +243,22 @@ describe("parseFeed (content-only entries)", () => {
   });
 });
 
+const RSS_INLINE_HTML = `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Inline</title><item>
+  <title>Entry</title>
+  <link>https://example.com/1</link>
+  <pubDate>Wed, 09 Sep 2026 10:00:00 GMT</pubDate>
+  <description><![CDATA[<p>Git<b>Hub</b>!</p><p>Second paragraph</p>]]></description>
+</item></channel></rss>`;
+
+describe("parseFeed (html in descriptions)", () => {
+  it("removes inline tags without inserting separators and keeps block boundaries", () => {
+    const [entry] = parseFeed(RSS_INLINE_HTML).items;
+
+    expect(entry.contentSnippet).toBe("GitHub! Second paragraph");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");
