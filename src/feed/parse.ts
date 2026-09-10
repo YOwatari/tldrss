@@ -37,8 +37,14 @@ const parser = new XMLParser({
   attributeNamePrefix: "",
   parseTagValue: false,
   parseAttributeValue: false,
-  trimValues: true,
+  // Whitespace around text nodes carries meaning in mixed content
+  // (`<title>Git<b>Hub</b>!</title>`), so it is normalized at the end instead.
+  trimValues: false,
 });
+
+function normalizeText(text: string): string {
+  return text.replaceAll(/\s+/g, " ").trim();
+}
 
 function tagName(node: OrderedNode): string {
   return Object.keys(node).find((key) => key !== ATTRIBUTES_KEY) ?? "";
@@ -91,22 +97,24 @@ function find(nodes: OrderedNode[], name: string, preferredPrefix = ""): Ordered
   return findAll(nodes, name, preferredPrefix)[0];
 }
 
-/** Concatenates the text of a child list, descending into nested markup. */
+/**
+ * Concatenates the text of a child list in document order, descending into
+ * nested markup — the same shape as DOM `textContent`, so inline markup never
+ * inserts or drops characters.
+ */
 function textOf(nodes: OrderedNode[]): string {
-  const parts: string[] = [];
+  let text = "";
 
   for (const node of nodes) {
-    const tag = tagName(node);
-    if (tag === TEXT_KEY) {
+    if (tagName(node) === TEXT_KEY) {
       const value = node[TEXT_KEY];
-      if (typeof value === "string" && value.length > 0) parts.push(value);
+      if (typeof value === "string") text += value;
       continue;
     }
-    const nested = textOf(childrenOf(node));
-    if (nested.length > 0) parts.push(nested);
+    text += textOf(childrenOf(node));
   }
 
-  return parts.join(" ").trim();
+  return text;
 }
 
 function firstText(
@@ -117,7 +125,7 @@ function firstText(
   for (const name of names) {
     const node = find(nodes, name, preferredPrefix);
     if (!node) continue;
-    const value = textOf(childrenOf(node));
+    const value = normalizeText(textOf(childrenOf(node)));
     if (value.length > 0) return value;
   }
   return undefined;
@@ -132,11 +140,12 @@ function extractLink(nodes: OrderedNode[], preferredPrefix = ""): string | undef
 
   for (const link of links) {
     const { href, rel } = attributesOf(link);
-    if (href && (rel === undefined || rel === "alternate")) return href;
+    const url = href === undefined ? "" : normalizeText(href);
+    if (url.length > 0 && (rel === undefined || normalizeText(rel) === "alternate")) return url;
   }
 
   for (const link of links) {
-    const value = textOf(childrenOf(link));
+    const value = normalizeText(textOf(childrenOf(link)));
     if (value.length > 0) return value;
   }
 
@@ -150,11 +159,7 @@ function extractLink(nodes: OrderedNode[], preferredPrefix = ""): string | undef
 const HTML_TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
 
 function stripHtml(html: string): string {
-  return html
-    .replaceAll(HTML_TAG, " ")
-    .replaceAll(/&nbsp;/g, " ")
-    .replaceAll(/\s+/g, " ")
-    .trim();
+  return normalizeText(html.replaceAll(HTML_TAG, " ").replaceAll(/&nbsp;/g, " "));
 }
 
 function toIsoDate(dateText: string | undefined): string | undefined {
@@ -173,11 +178,13 @@ function toEntry(entry: OrderedNode): FeedEntry {
   );
   const summary = firstText(fields, ["description", "summary"], prefix);
   const content = firstText(fields, ["content:encoded", "content"], prefix);
+  // Content-only feeds still get a cleaned snippet; `content` keeps the markup.
+  const snippetSource = summary ?? content;
 
   return {
     title: firstText(fields, ["title"], prefix),
     link: extractLink(fields, prefix) ?? firstText(fields, ["guid", "id"], prefix),
-    contentSnippet: summary === undefined ? undefined : stripHtml(summary),
+    contentSnippet: snippetSource === undefined ? undefined : stripHtml(snippetSource),
     content,
     pubDate,
     isoDate: toIsoDate(pubDate),

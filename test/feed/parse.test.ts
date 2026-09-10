@@ -205,6 +205,44 @@ describe("parseFeed (plain text that looks like markup)", () => {
   });
 });
 
+const ATOM_INLINE_MARKUP = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Git<b>Hub</b>!</title>
+  <entry>
+    <title>Git<b>Hub</b>!</title>
+    <link rel="alternate" href="https://example.org/inline"/>
+    <updated>2026-09-10T02:00:00Z</updated>
+  </entry>
+</feed>`;
+
+const RSS_CONTENT_ONLY = `<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel><title>Content only</title><item>
+    <title>Entry</title>
+    <link>https://example.com/1</link>
+    <pubDate>Wed, 09 Sep 2026 10:00:00 GMT</pubDate>
+    <content:encoded><![CDATA[<p>Body <b>text</b></p>]]></content:encoded>
+  </item></channel>
+</rss>`;
+
+describe("parseFeed (inline markup)", () => {
+  it("does not insert spaces at markup boundaries", () => {
+    const feed = parseFeed(ATOM_INLINE_MARKUP);
+
+    expect(feed.title).toBe("GitHub!");
+    expect(feed.items[0].title).toBe("GitHub!");
+  });
+});
+
+describe("parseFeed (content-only entries)", () => {
+  it("builds the snippet from content when no summary exists", () => {
+    const [entry] = parseFeed(RSS_CONTENT_ONLY).items;
+
+    expect(entry.content).toBe("<p>Body <b>text</b></p>");
+    expect(entry.contentSnippet).toBe("Body text");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");
