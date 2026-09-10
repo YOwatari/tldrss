@@ -77,6 +77,42 @@ describe("renderDigestHtml", () => {
   });
 });
 
+describe("renderDigestHtml (unsafe urls)", () => {
+  it.each(["javascript:alert(1)", "data:text/html,<script>x</script>", "vbscript:x"])(
+    "renders the title as plain text for a %s link",
+    (link) => {
+      const html = renderDigestHtml("[1] Summary.", [{ title: "Hostile", link }]);
+
+      expect(html).not.toContain("<a href");
+      expect(html).toContain("<li>Hostile<br />Summary.</li>");
+    },
+  );
+
+  it("renders the title as plain text when the link is a guid, not a url", () => {
+    // parse.ts falls back to <guid>/<id> when an entry carries no link.
+    const html = renderDigestHtml("[1] Summary.", [
+      { title: "Guid only", link: "urn:uuid:8f1b0c62-0000-4000-8000-000000000000" },
+    ]);
+
+    expect(html).not.toContain("<a href");
+    expect(html).toContain("<li>Guid only<br />Summary.</li>");
+  });
+
+  it("renders the title as plain text for a relative link", () => {
+    const html = renderDigestHtml("[1] Summary.", [{ title: "Relative", link: "/article/1" }]);
+
+    expect(html).not.toContain("<a href");
+  });
+
+  it("keeps linking absolute http and https urls", () => {
+    for (const link of ["http://example.com/1", "https://example.com/1"]) {
+      expect(renderDigestHtml("[1] Summary.", [{ title: "Fine", link }])).toContain(
+        `<a href="${link}">Fine</a>`,
+      );
+    }
+  });
+});
+
 describe("renderDigestHtml (lead)", () => {
   it("puts the text before the bullets into a lead paragraph", () => {
     const html = renderDigestHtml("Security was the theme today.\n[1] It shipped.", entries);

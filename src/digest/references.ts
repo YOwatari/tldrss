@@ -59,10 +59,30 @@ function renderRawText(summary: string): string {
     .join("<br />");
 }
 
+/**
+ * The href of a link the reader can safely follow, or null.
+ *
+ * Escaping alone would not help here: a feed-controlled `javascript:` or
+ * `data:` url stays active once the reader decodes the html. Entries can also
+ * carry a guid in place of a link (see `parse.ts`), which would render as a
+ * broken relative link, so only absolute http(s) urls become anchors.
+ */
+function safeHref(link: string | undefined): string | null {
+  if (link === undefined) return null;
+
+  try {
+    const url = new URL(link);
+    return /^https?:$/.test(url.protocol) ? link : null;
+  } catch {
+    return null;
+  }
+}
+
 function renderItem(entry: FeedEntry, summary: string): string {
   // Title and url come from the feed, never from the model.
   const title = escapeHtml(entry.title ?? "(untitled)");
-  const heading = entry.link ? `<a href="${escapeHtml(entry.link)}">${title}</a>` : title;
+  const href = safeHref(entry.link);
+  const heading = href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
 
   return `  <li>${heading}<br />${escapeHtml(summary)}</li>`;
 }
