@@ -51,6 +51,15 @@ describe("buildDigestPrompt (bounds)", () => {
     expect(prompt).not.toContain("Entry 2\n");
   });
 
+  it("truncates feed-controlled titles and urls", () => {
+    const prompt = buildDigestPrompt("F".repeat(MAX_EXCERPT_CHARS * 2), [
+      { title: "Entry", link: `https://example.com/${"u".repeat(MAX_EXCERPT_CHARS * 2)}` },
+    ]);
+
+    expect(prompt).not.toContain("F".repeat(MAX_EXCERPT_CHARS + 1));
+    expect(prompt).not.toContain("u".repeat(MAX_EXCERPT_CHARS + 1));
+  });
+
   it("caps the number of entries and says how many were dropped", () => {
     const many = Array.from({ length: MAX_PROMPT_ENTRIES + 5 }, (_, index) => ({
       title: `Entry ${index + 1}`,

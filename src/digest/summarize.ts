@@ -27,14 +27,16 @@ function publishedAt(entry: FeedEntry): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function buildDigestPrompt(feedTitle: string, entries: FeedEntry[]): string {
+export function buildDigestPrompt(rawFeedTitle: string, entries: FeedEntry[]): string {
+  // Every field below is feed-controlled, so all of them are bounded.
+  const feedTitle = truncate(rawFeedTitle, MAX_EXCERPT_CHARS);
   // Feeds are not required to be newest-first, so order before capping.
   const included = [...entries]
     .sort((left, right) => publishedAt(right) - publishedAt(left))
     .slice(0, MAX_PROMPT_ENTRIES);
   const lines = included.map((entry, index) => {
     const title = truncate(entry.title ?? "(untitled)", MAX_EXCERPT_CHARS);
-    const link = entry.link ?? "";
+    const link = truncate(entry.link ?? "", MAX_EXCERPT_CHARS);
     const snippet = truncate(entry.contentSnippet ?? entry.content ?? "", MAX_EXCERPT_CHARS);
     return `${index + 1}. ${title}\nURL: ${link}\nExcerpt: ${snippet}`;
   });
