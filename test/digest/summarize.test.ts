@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_AI_MODEL, buildDigestPrompt, summarizeEntries } from "../../src/digest/summarize";
+import {
+  DEFAULT_AI_MODEL,
+  MAX_EXCERPT_CHARS,
+  MAX_PROMPT_ENTRIES,
+  buildDigestPrompt,
+  summarizeEntries,
+} from "../../src/digest/summarize";
 
 const entries = [
   { title: "Entry 1", link: "https://example.com/1", contentSnippet: "Snippet 1" },
@@ -18,6 +24,30 @@ describe("buildDigestPrompt", () => {
     expect(prompt).toContain("Example Feed");
     expect(prompt).toContain("1. Entry 1\nURL: https://example.com/1\nExcerpt: Snippet 1");
     expect(prompt).toContain("2. (untitled)\nURL: https://example.com/2\nExcerpt: Body 2");
+  });
+});
+
+describe("buildDigestPrompt (bounds)", () => {
+  it("truncates long excerpts", () => {
+    const prompt = buildDigestPrompt("Example Feed", [
+      { title: "Long", link: "https://example.com/1", content: "x".repeat(MAX_EXCERPT_CHARS * 2) },
+    ]);
+
+    expect(prompt).toContain(`${"x".repeat(MAX_EXCERPT_CHARS)}…`);
+    expect(prompt).not.toContain("x".repeat(MAX_EXCERPT_CHARS + 1));
+  });
+
+  it("caps the number of entries and says how many were dropped", () => {
+    const many = Array.from({ length: MAX_PROMPT_ENTRIES + 5 }, (_, index) => ({
+      title: `Entry ${index + 1}`,
+      link: `https://example.com/${index + 1}`,
+    }));
+
+    const prompt = buildDigestPrompt("Example Feed", many);
+
+    expect(prompt).toContain(`${MAX_PROMPT_ENTRIES}. Entry ${MAX_PROMPT_ENTRIES}`);
+    expect(prompt).not.toContain(`Entry ${MAX_PROMPT_ENTRIES + 1}`);
+    expect(prompt).toContain(`${MAX_PROMPT_ENTRIES} of ${many.length}`);
   });
 });
 

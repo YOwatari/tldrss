@@ -9,19 +9,37 @@ const SYSTEM_PROMPT =
 
 const MAX_TOKENS = 1024;
 
+/**
+ * The prompt has to stay well inside the model's context window, so both the
+ * number of entries and the length of each excerpt are bounded.
+ */
+export const MAX_PROMPT_ENTRIES = 30;
+export const MAX_EXCERPT_CHARS = 400;
+
 export const NO_SUMMARY_FALLBACK = "No summary generated.";
 
+function truncate(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
 export function buildDigestPrompt(feedTitle: string, entries: FeedEntry[]): string {
-  const lines = entries.map((entry, index) => {
-    const title = entry.title ?? "(untitled)";
+  const included = entries.slice(0, MAX_PROMPT_ENTRIES);
+  const lines = included.map((entry, index) => {
+    const title = truncate(entry.title ?? "(untitled)", MAX_EXCERPT_CHARS);
     const link = entry.link ?? "";
-    const snippet = entry.contentSnippet ?? entry.content ?? "";
+    const snippet = truncate(entry.contentSnippet ?? entry.content ?? "", MAX_EXCERPT_CHARS);
     return `${index + 1}. ${title}\nURL: ${link}\nExcerpt: ${snippet}`;
   });
+
+  const note =
+    included.length < entries.length
+      ? [`Summarizing the ${included.length} of ${entries.length} most recent entries.`]
+      : [];
 
   return [
     `Create a concise daily digest of the following RSS entries from "${feedTitle}".`,
     "Keep it brief (4-8 bullet points), factual, and easy to scan.",
+    ...note,
     "",
     ...lines,
   ].join("\n");
