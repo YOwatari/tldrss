@@ -1,0 +1,29 @@
+{
+  "name": "tldrss",
+  "version": "1.0.0",
+  "description": "A daily RSS digest proxy that summarizes multiple feed entries into a single daily article using LLM.",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run",
+    "dev": "wrangler dev",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/YOwatari/tldrss"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260910.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
+    "wrangler": "^4.130.0"
+  },
+  "type": "module"
+}
