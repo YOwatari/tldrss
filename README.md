@@ -3,7 +3,7 @@ A daily RSS digest proxy on Cloudflare Workers.
 
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
-- `GET /digest/{sha256(url)}/{JST date}` (add `?lang=ja` for the Japanese one) serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here.
+- `GET /digest/{sha256(url)}/{JST date}?lang={en|ja}` serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here. The item link always spells the language out, `lang=en` included, so it keeps pointing at the same digest if the default ever changes; `lang` may be omitted when requesting the page by hand, and then defaults to `en`.
 - `/` answers with usage instructions and doubles as a health check; any other path is a 404.
 - The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
 - Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
