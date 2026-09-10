@@ -33,9 +33,15 @@ function cdata(html: string): string {
 }
 
 /**
- * The channel head, shared by the digest feed and the item-less one. The atom
- * namespace is declared for `<atom:link rel="self">`, which feed validators
- * expect and which tells a reader where the feed lives.
+ * The channel head, shared by the digest feed and the item-less one.
+ *
+ * There is no `<atom:link rel="self">`. A self link has to be the address the
+ * reader subscribed to, which is `/feed?url=<feed url>` — the one thing that
+ * must not travel in the xml, since the feed url is user-supplied and may
+ * carry a token. Once a subscription has a credential-free address of its own
+ * (issue #8), the self link can name that instead. `<link>` names the worker
+ * for the same reason: it is where a reader finds out what this feed is,
+ * without disclosing which feed it summarizes.
  */
 function channelHead(params: {
   feedTitle: string;
@@ -44,12 +50,11 @@ function channelHead(params: {
   now: Date;
 }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0">
   <channel>
     <title>${escapeXml(channelTitleText(params.feedTitle, params.language))}</title>
-    <link>${escapeXml(params.links.feedUrl)}</link>
+    <link>${escapeXml(params.links.siteUrl)}</link>
     <description>${escapeXml(channelDescriptionText(params.feedTitle, params.language))}</description>
-    <atom:link rel="self" type="application/rss+xml" href="${escapeXml(params.links.feedUrl)}" />
     <lastBuildDate>${params.now.toUTCString()}</lastBuildDate>`;
 }
 

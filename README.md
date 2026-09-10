@@ -8,9 +8,9 @@ A daily RSS digest proxy on Cloudflare Workers.
 - The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
 - Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
 - Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails. The body of the page is stored beside it under `digest-html:{...}`.
-- The digest carries at most one `<item>`, its `<guid isPermaLink="false">` is `{sha256(url)}-{JST date}-{lang}`, and its `<pubDate>` is 09:00 JST of the day it covers rather than the generation time — Slack posts one message per new guid, and readers sort by `pubDate`.
+- The digest carries at most one `<item>`, its `<guid isPermaLink="false">` is `{sha256(url)}-{JST date}-{lang}`, and its `<pubDate>` is 09:00 JST of the day it covers rather than the generation time — Slack posts one message per new guid, and readers sort by `pubDate`. The channel also carries a `<lastBuildDate>`, but no `<atom:link rel="self">`: a self address would have to be the `/feed?url=...` the reader subscribed to, and that is the one thing the XML must not carry.
 - A day the feed published nothing gets an item-less channel, so Slack posts nothing. Set `POST_NO_UPDATES` to have it report the quiet day instead.
-- Neither the guid nor any link carries the feed url: it is user-supplied and may hold a token, while the XML reaches every subscriber.
+- Neither the guid nor any link carries the feed url: it is user-supplied and may hold a token, while the XML reaches every subscriber. The channel's `<link>` is the worker itself for the same reason.
 
 ### Response timing
 Feed readers time out quickly, so `/feed` never generates a digest inside the request:

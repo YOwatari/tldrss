@@ -691,7 +691,7 @@ describe("GET /feed (guid)", () => {
     const digest = await (await callWorker({ ...bindings, AI: stubAi().ai }, workerUrl)).text();
 
     for (const body of [placeholder, digest]) {
-      expect(body).toContain("<link>https://worker.example/feed</link>");
+      expect(body).toContain("<link>https://worker.example/</link>");
       expect(body).not.toContain("super-secret");
       expect(body).not.toContain("token=");
     }

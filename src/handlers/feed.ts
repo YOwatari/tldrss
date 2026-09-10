@@ -114,13 +114,14 @@ export async function handleFeed(
 }
 
 /**
- * The addresses that travel to readers. Both are built from the path only: the
- * `url` query parameter can carry a token for a private feed, and the xml they
- * end up in is handed to every subscriber.
+ * The addresses that travel to readers. Neither carries the `url` query
+ * parameter: it can hold a token for a private feed, while the xml it would
+ * end up in is stored in KV and handed to every subscriber. That rules out a
+ * `rel="self"` address too; see `channelHead` in `digest/build.ts`.
  */
 function digestLinksOf(requestUrl: URL, ref: DigestRef): DigestLinks {
   return {
-    feedUrl: `${requestUrl.origin}${requestUrl.pathname}`,
+    siteUrl: `${requestUrl.origin}/`,
     // The language is spelled out even when it is the default one, so the link
     // keeps pointing at this digest if the default ever changes.
     pageUrl: `${requestUrl.origin}/digest/${ref.hash}/${ref.date}?lang=${ref.language}`,

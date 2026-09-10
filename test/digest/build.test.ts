@@ -6,7 +6,7 @@ import type { Digest } from "../../src/digest/types";
 const FEED_HASH = "a".repeat(64);
 
 const LINKS = {
-  feedUrl: "https://worker.example/feed",
+  siteUrl: "https://worker.example/",
   pageUrl: `https://worker.example/digest/${FEED_HASH}/2026-09-10?lang=en`,
 };
 
@@ -99,12 +99,25 @@ describe("buildDigestXml", () => {
     expect(parse(xml).channel.item.description).toBe(html);
   });
 
-  it("declares the channel's own address and when it was last built", () => {
+  it("says when the channel was last built", () => {
     const rss = parse(buildDigestXml({ digest: digestOf(), links: LINKS, now: NOW }));
 
-    expect(rss.channel["atom:link"]["@rel"]).toBe("self");
-    expect(rss.channel["atom:link"]["@href"]).toBe(LINKS.feedUrl);
     expect(rss.channel.lastBuildDate).toBe(NOW.toUTCString());
+  });
+
+  it("points the channel at the worker rather than at the feed it summarizes", () => {
+    const rss = parse(buildDigestXml({ digest: digestOf(), links: LINKS, now: NOW }));
+
+    expect(rss.channel.link).toBe(LINKS.siteUrl);
+  });
+
+  it("claims no self address, which cannot be given without the feed url", () => {
+    const xml = buildDigestXml({ digest: digestOf(), links: LINKS, now: NOW });
+
+    // A self link would have to be the /feed url the reader subscribed to,
+    // query string and any token in it included. See the note in `build.ts`.
+    expect(xml).not.toContain('rel="self"');
+    expect(xml).not.toContain("xmlns:atom");
   });
 
   it("escapes a feed title that carries markup", () => {

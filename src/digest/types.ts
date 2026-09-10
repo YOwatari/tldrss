@@ -24,8 +24,8 @@ export type Digest = {
 
 /** The reader-facing addresses of a digest. Neither carries the feed url. */
 export type DigestLinks = {
-  /** The `/feed` endpoint itself, announced as `<atom:link rel="self">`. */
-  feedUrl: string;
+  /** The worker itself, named as the site the channel belongs to. */
+  siteUrl: string;
   /** The page carrying the full digest body, `/digest/{hash}/{date}`. */
   pageUrl: string;
 };
