@@ -4,7 +4,7 @@ import {
   reset,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { sha256Hex } from "../src/hash";
 import { putSubscription } from "../src/store/subscriptions";
@@ -787,11 +787,17 @@ describe("GET /digest/{hash}/{date}", () => {
 
 describe("scheduled", () => {
   const CRON = "50 23 * * *";
+  const SCHEDULED_TIME = Date.parse("2026-09-09T23:50:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SCHEDULED_TIME);
+  });
 
   /** What the runtime hands `scheduled`; the handler reads two of its fields. */
   function trigger(): ScheduledController {
     return {
-      scheduledTime: Date.now(),
+      scheduledTime: SCHEDULED_TIME,
       cron: CRON,
       noRetry: () => {},
     } as ScheduledController;
@@ -816,7 +822,9 @@ describe("scheduled", () => {
 
     expect(run).toHaveBeenCalledTimes(1);
     const stored = await storedDigest();
-    expect(stored?.key).toBe(`digest:${await sha256Hex(FEED_URL)}:${jstDate()}:en`);
+    expect(stored?.key).toBe(
+      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en`,
+    );
     expect(stored?.value).toContain("https://worker.example/digest/");
   });
 
@@ -831,6 +839,7 @@ describe("scheduled", () => {
     });
     await runSchedule(env);
 
+    vi.setSystemTime(SCHEDULED_TIME + 10 * 60 * 1000);
     const body = await (await callWorker(env)).text();
 
     expect(body).toContain("<item>");
