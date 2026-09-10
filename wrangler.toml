@@ -1,10 +1,10 @@
 name = "tldrss"
 main = "src/index.ts"
-compatibility_date = "2026-09-10"
+compatibility_date = "2026-08-22"
 
 [[kv_namespaces]]
 binding = "DIGEST_CACHE"
 id = "placeholder"
 
 [vars]
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"

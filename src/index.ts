@@ -15,7 +15,7 @@ function cacheKey(feedUrl: string, now = new Date()): string {
 }
 
 async function summarizeWithGemini(prompt: string, env: Env): Promise<string> {
-  const model = env.GEMINI_MODEL ?? "gemini-1.5-flash";
+  const model = env.GEMINI_MODEL ?? "gemini-2.5-flash";
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
     {
