@@ -11,7 +11,6 @@ import { type Env, maxEntriesOf } from "../env";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
-import { createWorkersAiSummarizer } from "../llm/workers-ai";
 import { sha256Hex } from "../hash";
 import { getDigest, putDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
@@ -50,11 +49,18 @@ function normalizeFeedUrl(raw: string): URL | null {
   return url;
 }
 
-/** GET /feed?url=<feed>&lang=<en|ja> */
+/**
+ * GET /feed?url=<feed>&lang=<en|ja>
+ *
+ * The summarizer is passed in rather than built here: which model answers is
+ * a decision for the composition root (`index.ts`), and a test can summarize
+ * without one.
+ */
 export async function handleFeed(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
+  summarizer: Summarizer,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
 
@@ -93,7 +99,7 @@ export async function handleFeed(
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateDigest(env, ref, feedUrl, publicUrl));
+  ctx.waitUntil(generateDigest(env, summarizer, ref, feedUrl, publicUrl));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -117,13 +123,11 @@ export async function handleFeed(
  * every crawl.
  */
 async function summarizeOrList(
-  env: Env,
+  summarizer: Summarizer,
   selection: EntrySelection,
   feedTitle: string,
   language: DigestLanguage,
 ): Promise<string> {
-  const summarizer: Summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
-
   try {
     const summary = await summarizer.summarize({
       feedTitle,
@@ -157,6 +161,7 @@ async function summarizeOrList(
  */
 async function generateDigest(
   env: Env,
+  summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
   publicUrl: string,
@@ -169,7 +174,7 @@ async function generateDigest(
     if (!lockToken) return;
 
     try {
-      const digestXml = await buildDigest(env, ref, feedUrl, publicUrl);
+      const digestXml = await buildDigest(env, summarizer, ref, feedUrl, publicUrl);
       await putDigest(env.DIGEST_CACHE, ref, digestXml);
     } finally {
       await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
@@ -184,6 +189,7 @@ async function generateDigest(
 
 async function buildDigest(
   env: Env,
+  summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
   publicUrl: string,
@@ -200,7 +206,7 @@ async function buildDigest(
   const summaryHtml =
     selection.entries.length === 0
       ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
-      : await summarizeOrList(env, selection, feedTitle, ref.language);
+      : await summarizeOrList(summarizer, selection, feedTitle, ref.language);
 
   return buildRssXml({
     publicUrl,
