@@ -63,10 +63,16 @@ function resolveBullets(
  *
  * The prompt asks for plain lines, so this is usually just escaped text. A
  * model that answers in html anyway is the reason it goes through the
- * sanitizer rather than straight through `escapeHtml`.
+ * sanitizer rather than straight through `escapeHtml`. The entries are handed
+ * over with it so that a link in the answer survives only when the feed
+ * published it.
  */
-function renderRawText(summary: string): string {
-  return sanitizeLlmHtml(summary);
+function renderRawText(summary: string, entries: FeedEntry[]): string {
+  return sanitizeLlmHtml(summary, {
+    allowedHrefs: entries
+      .map((entry) => safeHref(entry.link))
+      .filter((link): link is string => link !== null),
+  });
 }
 
 /**
@@ -114,7 +120,7 @@ export function renderDigestHtml(
   const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
 
   // The model ignored the format, or there was nothing to summarize at all.
-  if (!sawBullet) return renderRawText(summary);
+  if (!sawBullet) return renderRawText(summary, entries);
 
   const items = entries
     .map((entry, index) => {
@@ -125,7 +131,7 @@ export function renderDigestHtml(
 
   // Not one bullet resolved to an entry. Showing the model's own text keeps
   // something readable in the feed rather than an empty digest.
-  if (items.length === 0) return renderRawText(summary);
+  if (items.length === 0) return renderRawText(summary, entries);
 
   const paragraph =
     lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;

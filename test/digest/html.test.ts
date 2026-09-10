@@ -66,6 +66,26 @@ describe("renderDigestHtml", () => {
     expect(html).toBe("<p>Lead.</p><ul><li>One</li></ul>");
   });
 
+  it("keeps a link of a model that answered in html when the feed published it", () => {
+    const html = renderDigestHtml(
+      '<p><a href="https://example.com/1">First article</a></p>',
+      entries,
+    );
+
+    expect(html).toBe('<p><a href="https://example.com/1">First article</a></p>');
+  });
+
+  // The model is prompted with feed text, so a url in its answer is not
+  // evidence that the feed published it.
+  it("refuses a link a model invented", () => {
+    const html = renderDigestHtml(
+      '<p><a href="https://phishing.example/pay">Claim your prize</a></p>',
+      entries,
+    );
+
+    expect(html).toBe("<p><a>Claim your prize</a></p>");
+  });
+
   it("sanitizes the markup of a model that answered in html", () => {
     const html = renderDigestHtml(
       '```html\n<p onclick="steal()">Lead.</p><script>alert(1)</script>\n```',

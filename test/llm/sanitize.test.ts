@@ -6,7 +6,7 @@ describe("sanitizeLlmHtml (allowed markup)", () => {
     const html =
       "<p>Lead.</p><h3>Articles</h3><ul><li><a href=\"https://example.com/1\">One</a> — summary</li></ul>";
 
-    expect(sanitizeLlmHtml(html)).toBe(html);
+    expect(sanitizeLlmHtml(html, { allowedHrefs: ["https://example.com/1"] })).toBe(html);
   });
 
   it("keeps strong and normalizes a void break", () => {
@@ -57,20 +57,62 @@ describe("sanitizeLlmHtml (disallowed markup)", () => {
 
   it("strips event handlers from an anchor", () => {
     expect(
-      sanitizeLlmHtml('<a href="https://example.com/1" onclick="steal()">One</a>'),
+      sanitizeLlmHtml('<a href="https://example.com/1" onclick="steal()">One</a>', {
+        allowedHrefs: ["https://example.com/1"],
+      }),
     ).toBe('<a href="https://example.com/1">One</a>');
   });
 });
 
 describe("sanitizeLlmHtml (links)", () => {
-  it("keeps an http(s) href", () => {
-    expect(sanitizeLlmHtml('<a href="http://example.com/1">One</a>')).toBe(
-      '<a href="http://example.com/1">One</a>',
-    );
+  it("keeps an href the caller listed", () => {
+    expect(
+      sanitizeLlmHtml('<a href="http://example.com/1">One</a>', {
+        allowedHrefs: ["http://example.com/1"],
+      }),
+    ).toBe('<a href="http://example.com/1">One</a>');
+  });
+
+  it("keeps an href the caller listed in a different but equivalent spelling", () => {
+    expect(
+      sanitizeLlmHtml('<a href="https://example.com">One</a>', {
+        allowedHrefs: ["https://example.com/"],
+      }),
+    ).toBe('<a href="https://example.com/">One</a>');
+  });
+
+  // The feed text the model was prompted with is attacker-controlled, so a url
+  // the model wrote is not evidence that the url exists in the feed.
+  it("drops an href the caller did not list", () => {
+    expect(
+      sanitizeLlmHtml('<a href="https://phishing.example/pay">Click</a>', {
+        allowedHrefs: ["https://example.com/1"],
+      }),
+    ).toBe("<a>Click</a>");
+  });
+
+  it("drops every href when the caller listed none", () => {
+    expect(sanitizeLlmHtml('<a href="https://example.com/1">One</a>')).toBe("<a>One</a>");
+  });
+
+  it("ignores a listed url that is not http(s)", () => {
+    expect(
+      sanitizeLlmHtml('<a href="javascript:alert(1)">Click</a>', {
+        allowedHrefs: ["javascript:alert(1)"],
+      }),
+    ).toBe("<a>Click</a>");
   });
 
   it("drops a javascript: href but keeps the link text", () => {
     expect(sanitizeLlmHtml('<a href="javascript:alert(1)">Click</a>')).toBe("<a>Click</a>");
+  });
+
+  it("drops a javascript: href even when the entry list is non-empty", () => {
+    expect(
+      sanitizeLlmHtml('<a href="javascript:alert(1)">Click</a>', {
+        allowedHrefs: ["https://example.com/1"],
+      }),
+    ).toBe("<a>Click</a>");
   });
 
   it("drops a javascript: href hidden behind an entity", () => {
@@ -90,9 +132,11 @@ describe("sanitizeLlmHtml (links)", () => {
   });
 
   it("escapes a quote inside an href", () => {
-    expect(sanitizeLlmHtml('<a href=\'https://example.com/?q="x\'>One</a>')).toBe(
-      '<a href="https://example.com/?q=%22x">One</a>',
-    );
+    expect(
+      sanitizeLlmHtml('<a href=\'https://example.com/?q="x\'>One</a>', {
+        allowedHrefs: ['https://example.com/?q="x'],
+      }),
+    ).toBe('<a href="https://example.com/?q=%22x">One</a>');
   });
 });
 

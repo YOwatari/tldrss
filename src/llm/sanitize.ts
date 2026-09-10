@@ -67,31 +67,44 @@ function renderText(text: string): string {
 }
 
 /**
- * The `href` of a link the reader can safely follow, already escaped, or null.
+ * One absolute http(s) url in the spelling `URL` settles on, or null.
  *
  * The value is decoded first: `java&#115;cript:` reaches the reader as a
  * working `javascript:` url, so the scheme has to be judged after decoding.
- * `URL` then re-encodes what it accepted, which is what gets written back.
+ * Relative urls end up as null too — they would resolve against the reader's
+ * own page rather than the source.
  */
-function safeHref(attributes: string): string | null {
-  const match = HREF_PATTERN.exec(attributes);
-  if (!match) return null;
-
-  const raw = decodeHtmlEntities(match[1] ?? match[2] ?? match[3] ?? "");
+function normalizeUrl(raw: string): string | null {
   try {
-    const url = new URL(raw);
-    // Relative urls end up here too: they would resolve against the reader's
-    // own page rather than the source, so only absolute http(s) urls survive.
-    return /^https?:$/.test(url.protocol) ? escapeText(url.toString()) : null;
+    const url = new URL(decodeHtmlEntities(raw));
+    return /^https?:$/.test(url.protocol) ? url.toString() : null;
   } catch {
     return null;
   }
 }
 
-function openTag(tag: string, attributes: string): string {
+/**
+ * The `href` of a link the digest may carry, already escaped, or null.
+ *
+ * A url the model wrote is not evidence that the url exists: the model is
+ * prompted with feed text, which is attacker-controlled, so an answer can
+ * carry a link the feed never published. Only the urls the caller vouched for
+ * survive; the scheme check alone would leave phishing links working.
+ */
+function safeHref(attributes: string, allowed: Set<string>): string | null {
+  const match = HREF_PATTERN.exec(attributes);
+  if (!match) return null;
+
+  const url = normalizeUrl(match[1] ?? match[2] ?? match[3] ?? "");
+  if (url === null || !allowed.has(url)) return null;
+
+  return escapeText(url);
+}
+
+function openTag(tag: string, attributes: string, allowed: Set<string>): string {
   if (tag !== "a") return `<${tag}>`;
 
-  const href = safeHref(attributes);
+  const href = safeHref(attributes, allowed);
   // A link with no usable target keeps its text but stops being a link.
   return href === null ? "<a>" : `<a href="${href}">`;
 }
@@ -112,14 +125,29 @@ function closeDownTo(stack: string[], tag: string): string {
  * The renderer builds the digest body itself and does not need this — see
  * `digest/html.ts`. It is the guard on the one path where the model's
  * own formatting reaches the reader, so nothing the model writes has to be
- * trusted to be markup, or to be safe.
+ * trusted to be markup, to be safe, or to point where it claims.
  */
-export function sanitizeLlmHtml(raw: string): string {
+export type SanitizeOptions = {
+  /**
+   * The urls an anchor may point at, in any spelling. Anything else keeps its
+   * text and loses its link, so a digest can only ever link where the caller
+   * says the feed does.
+   */
+  allowedHrefs?: Iterable<string>;
+};
+
+export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): string {
   const source = raw
     .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
     .replace(RAW_TEXT_PATTERN, "")
     .replace(DECLARATION_PATTERN, "")
     .replace(CODE_FENCE_PATTERN, "");
+
+  const allowed = new Set(
+    [...(options.allowedHrefs ?? [])]
+      .map(normalizeUrl)
+      .filter((url): url is string => url !== null),
+  );
 
   const parts: string[] = [];
   const open: string[] = [];
@@ -146,7 +174,7 @@ export function sanitizeLlmHtml(raw: string): string {
     }
 
     open.push(tag);
-    parts.push(openTag(tag, attributes));
+    parts.push(openTag(tag, attributes, allowed));
   }
 
   parts.push(renderText(source.slice(cursor)));

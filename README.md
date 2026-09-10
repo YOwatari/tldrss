@@ -31,7 +31,7 @@ No API key is needed: Workers AI is billed through the account that owns the wor
 Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://developers.cloudflare.com/workers-ai/models/).
 
 ## Digest body
-The model is asked for a lead paragraph and one plain-text bullet per entry, each citing an entry number. The worker builds the HTML itself from those numbers, so every title and link a reader sees comes from the feed rather than from the model. An answer that ignores the format is passed through `llm/sanitize.ts` instead, which keeps only `<p> <h3> <ul> <li> <a> <strong> <br>`, drops every attribute but an `http(s)` `href`, and balances what the model left open.
+The model is asked for a lead paragraph and one plain-text bullet per entry, each citing an entry number. The worker builds the HTML itself from those numbers, so every title and link a reader sees comes from the feed rather than from the model. An answer that ignores the format is passed through `llm/sanitize.ts` instead, which keeps only `<p> <h3> <ul> <li> <a> <strong> <br>`, drops every attribute, balances what the model left open, and keeps an `href` only when it is one the feed published — the model is prompted with attacker-controlled feed text, so a url it writes is no evidence the url exists.
 
 Swapping the model provider means implementing `Summarizer` (`src/llm/summarizer.ts`); nothing outside `src/llm/` knows which one is in use.
 
