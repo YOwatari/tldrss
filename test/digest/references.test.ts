@@ -60,6 +60,25 @@ describe("renderDigestHtml", () => {
     expect(html).toBe("No new entries were published.");
   });
 
+  it("keeps the allowed markup of a model that answered in html", () => {
+    const html = renderDigestHtml("<p>Lead.</p><ul><li>One</li></ul>", entries);
+
+    expect(html).toBe("<p>Lead.</p><ul><li>One</li></ul>");
+  });
+
+  it("sanitizes the markup of a model that answered in html", () => {
+    const html = renderDigestHtml(
+      '```html\n<p onclick="steal()">Lead.</p><script>alert(1)</script>\n```',
+      entries,
+    );
+
+    expect(html).toBe("<p>Lead.</p>");
+  });
+
+  it("keeps the line breaks of a plain-text answer", () => {
+    expect(renderDigestHtml("first\nsecond", entries)).toBe("first<br />second");
+  });
+
   it("escapes html from the model and from the feed", () => {
     const hostile = [{ title: "<b>t</b>", link: 'https://example.com/"><script>x</script>' }];
 

@@ -1,4 +1,5 @@
 import type { FeedEntry } from "../feed/parse";
+import { sanitizeLlmHtml } from "../llm/sanitize";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
 import { untitledEntryText } from "./text";
 
@@ -53,12 +54,15 @@ function resolveBullets(
   return { lead, byEntry, sawBullet };
 }
 
-/** Last resort: the model's answer as-is, with line breaks preserved. */
+/**
+ * Last resort: the model's own answer, reduced to markup a digest may carry.
+ *
+ * The prompt asks for plain lines, so this is usually just escaped text. A
+ * model that answers in html anyway is the reason it goes through the
+ * sanitizer rather than straight through `escapeHtml`.
+ */
 function renderRawText(summary: string): string {
-  return escapeHtml(summary)
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("<br />");
+  return sanitizeLlmHtml(summary);
 }
 
 /**
