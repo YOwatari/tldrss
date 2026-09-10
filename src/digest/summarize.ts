@@ -42,8 +42,9 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     rules: [
       "Open with a 2-3 sentence lead saying what the day was about, on its own " +
         "line and without any number.",
-      "Then pick the 4-8 most notable entries and write one bullet for each. " +
-        "Never cover the same entry twice.",
+      "Then write one bullet per entry: the 4-8 most notable ones, or every " +
+        "entry listed when fewer than four are available. Never cover the same " +
+        "entry twice.",
       "Write one line per bullet: the entry number in square brackets, then the " +
         'summary, e.g. "[3] Adds a Rust query and covers Kotlin frameworks." ' +
         "Use only the numbers listed below.",
@@ -64,7 +65,8 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     rules: [
       "最初に、その日の全体像を 2〜3 文でまとめたリード文を書いてください。" +
         "リード文は独立した行に書き、番号を付けないでください。",
-      "続けて重要なエントリを 4〜8 件選び、1 件につき 1 項目を書いてください。" +
+      "続けて、エントリ 1 件につき 1 項目を書いてください。重要なものを 4〜8 件" +
+        "選び、エントリが 4 件未満のときは挙がっているものをすべて扱ってください。" +
         "同じエントリを二度扱わないでください。",
       "各項目は 1 行で、エントリ番号を角かっこで囲んだあとに要約を続けてください。" +
         "例:「[3] Rust のクエリが追加され、Kotlin のフレームワークも対象になった。」。" +

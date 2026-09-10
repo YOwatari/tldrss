@@ -195,3 +195,20 @@ describe("reference markers", () => {
     expect(buildDigestPrompt("Example Feed", entries, "ja")).toContain("角かっこ");
   });
 });
+
+describe("prompt for a short feed", () => {
+  const two = [
+    { title: "One", link: "https://example.com/1" },
+    { title: "Two", link: "https://example.com/2" },
+  ];
+
+  // Asking for 4-8 bullets while forbidding repeats and invented numbers is
+  // impossible for a feed this small, and pushes the model to make numbers up.
+  it("allows covering every entry in English", () => {
+    expect(buildDigestPrompt("Example Feed", two)).toContain("fewer than four");
+  });
+
+  it("allows covering every entry in Japanese", () => {
+    expect(buildDigestPrompt("Example Feed", two, "ja")).toContain("4 件未満");
+  });
+});
