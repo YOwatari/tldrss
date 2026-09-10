@@ -101,6 +101,52 @@ describe("routing", () => {
     expect(await response.text()).toContain("/feed?url=");
   });
 
+  it("returns 405 for a method the endpoint does not serve", async () => {
+    const { ai, run } = stubAi();
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request(WORKER_URL, { method: "POST" }),
+      { ...bindings, AI: ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    // A rejected method must not reach the feed or the model.
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("serves HEAD, which readers use to poll", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request(WORKER_URL, { method: "HEAD" }),
+      { ...bindings, AI: stubAi().ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    await expect(storedDigest()).resolves.not.toBeNull();
+  });
+
+  it("returns 404, not 405, for an unknown path with an unserved method", async () => {
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/does-not-exist", { method: "POST" }),
+      { ...bindings, AI: stubAi().ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    // 405 claims the resource exists but rejects the method.
+    expect(response.status).toBe(404);
+  });
+
   it("returns 404 for any other path", async () => {
     const response = await callWorker(
       { ...bindings, AI: stubAi().ai },
@@ -356,6 +402,39 @@ describe("GET /feed (upstream failures)", () => {
 
     expect(response.status).toBe(200);
     expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("serves 200 and stores nothing when the model call fails", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
+
+    const response = await callWorker({ ...bindings, AI: { run } as unknown as Ai });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<item>");
+    await expect(storedDigest()).resolves.toBeNull();
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("retries the model call on the next request after it failed", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("model unavailable"))
+      .mockResolvedValue({ response: "- summary" });
+    const env = { ...bindings, AI: { run } as unknown as Ai };
+
+    await callWorker(env);
+    await callWorker(env);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    await expect(storedDigest()).resolves.toMatchObject({
+      value: expect.stringContaining("- summary"),
+    });
     errors.mockRestore();
   });
 

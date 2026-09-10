@@ -15,8 +15,10 @@ function digestTitleOf(feedTitle: string): string {
 
 /**
  * A valid RSS 2.0 channel with no `<item>`, served while the digest of the day
- * is still being generated. Readers accept it as a healthy subscription and
- * post nothing, so the first crawl never shows an error.
+ * is still being generated. It is well-formed and carries no entry, so the
+ * intent is that a reader treats the first crawl as an ordinary empty feed
+ * rather than an error; how Slack actually reacts is still to be confirmed
+ * (see issue #9).
  */
 export function buildEmptyChannelXml(params: {
   /** Worker url shown to readers; must not carry the feed url. */
