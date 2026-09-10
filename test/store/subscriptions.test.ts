@@ -1,6 +1,7 @@
 import { env as providedEnv, reset } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  register, touch, remove, SUBSCRIPTION_TTL_SECONDS,
   listSubscriptions,
   putSubscription,
   subscriptionKey,
@@ -78,4 +79,65 @@ describe("listSubscriptions", () => {
 
     expect(listed.map((entry) => entry.hash).sort()).toEqual([...hashes].sort());
   });
+});
+
+
+describe("subscription lifecycle", () => {
+  const now = new Date("2026-09-10T00:00:00Z");
+
+  it("registers independently during concurrent crawls and preserves registration time", async () => {
+    const urls = ["https://one.example/rss", "https://two.example/rss"];
+    const entries = await Promise.all(urls.map(url => register(kv, url, now)));
+    expect((await listSubscriptions(kv)).map(s => s.url).sort()).toEqual(urls);
+    expect(entries[0].registeredAt).toBe(now.toISOString());
+    expect(await register(kv, urls[0], new Date(now.getTime() + 1000))).toEqual(entries[0]);
+    const keys = await kv.list({ prefix: "sub:" });
+    for (const key of keys.keys) {
+      expect(key.expiration).toBeGreaterThan(Math.floor(Date.now() / 1000) + SUBSCRIPTION_TTL_SECONDS - 10);
+    }
+  });
+
+  it("writes only at the twelve-hour boundary and preserves registeredAt", async () => {
+    const entry = await register(kv, SUBSCRIPTION.url, now);
+    expect(await touch(kv, entry.hash, new Date(now.getTime() + 12 * 3600000 - 1))).toBe(false);
+    expect((await listSubscriptions(kv))[0].lastSeenAt).toBe(now.toISOString());
+    expect(await touch(kv, entry.hash, new Date(now.getTime() + 12 * 3600000))).toBe(true);
+    expect((await listSubscriptions(kv))[0]).toMatchObject({
+      registeredAt: now.toISOString(), lastSeenAt: "2026-09-10T12:00:00.000Z",
+    });
+    await remove(kv, entry.hash);
+    expect(await listSubscriptions(kv)).toEqual([]);
+    expect(await touch(kv, entry.hash, now)).toBe(false);
+    await remove(kv, entry.hash);
+  });
+});
+
+it("renews expiration on refresh and disappears from listing after eight idle days", async () => {
+  let clock = 0;
+  const records = new Map<string, { value: string; expires: number }>();
+  let writes = 0;
+  const fake = {
+    async put(key: string, value: string, options: { expirationTtl: number }) {
+      writes++;
+      records.set(key, { value, expires: clock + options.expirationTtl * 1000 });
+    },
+    async get(key: string) {
+      const record = records.get(key);
+      return record && record.expires > clock ? record.value : null;
+    },
+    async list() {
+      return { list_complete: true, keys: [...records].filter(([, record]) => record.expires > clock).map(([name]) => ({ name })) };
+    },
+  } as unknown as KVNamespace;
+  const entry = await register(fake, SUBSCRIPTION.url, new Date(clock));
+  clock = 12 * 3600000 - 1;
+  await touch(fake, entry.hash, new Date(clock));
+  expect(writes).toBe(1);
+  clock++;
+  await touch(fake, entry.hash, new Date(clock));
+  expect(writes).toBe(2);
+  clock += SUBSCRIPTION_TTL_SECONDS * 1000 - 1;
+  expect(await listSubscriptions(fake)).toHaveLength(1);
+  clock++;
+  expect(await listSubscriptions(fake)).toEqual([]);
 });

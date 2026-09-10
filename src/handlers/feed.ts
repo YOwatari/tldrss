@@ -7,7 +7,8 @@ import {
 import { buildEmptyChannelXml } from "../digest/build";
 import { digestLinksOf, generateDigest } from "../digest/generate";
 import type { DigestLinks } from "../digest/types";
-import type { Env } from "../env";
+import { type Env, isFeedAllowed, maxSubscriptionsOf } from "../env";
+import { register, touch, SubscriptionLimitError } from "../store/subscriptions";
 import type { Summarizer } from "../llm/summarizer";
 import { sha256Hex } from "../hash";
 import { getDigest } from "../store/digest-cache";
@@ -79,6 +80,21 @@ export async function handleFeed(
     );
   }
   const language: DigestLanguage = requestedLanguage ?? DEFAULT_LANGUAGE;
+
+  if (!isFeedAllowed(env, feedUrl, requestUrl.searchParams.get("token"))) {
+    return new Response("Feed access forbidden", { status: 403 });
+  }
+
+  try {
+    const subscription = await register(env.DIGEST_CACHE, feedUrl.toString(), new Date(), maxSubscriptionsOf(env));
+    await touch(env.DIGEST_CACHE, subscription.hash);
+  } catch (error) {
+    if (error instanceof SubscriptionLimitError) {
+      return new Response("Subscription limit reached", { status: 429 });
+    }
+    console.error("Failed to persist subscription");
+    return new Response("Subscription storage unavailable", { status: 503 });
+  }
 
   const ref: DigestRef = {
     hash: await sha256Hex(feedUrl.toString()),

@@ -82,6 +82,8 @@ export async function handleScheduled(
     return logRun(trigger, { date, total: 0, ...tally, durationMs: Date.now() - startedAt });
   }
 
+  // KV expires subscriptions eight days after their last refresh, so listing
+  // automatically excludes feeds whose readers stopped crawling.
   const subscriptions = await listSubscriptions(env.DIGEST_CACHE);
 
   await forEachConcurrently(subscriptions, CRON_CONCURRENCY, async (subscription) => {

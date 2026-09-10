@@ -12,7 +12,7 @@ const WORKER_URL = `https://worker.example/feed?url=${FEED_URL}`;
  * The handler takes a `Summarizer`, so these tests need no `AI` binding: the
  * model is the fake below.
  */
-const bindings = providedEnv as unknown as Omit<Env, "AI">;
+const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example" };
 
 function fakeSummarizer(answer = "[1] It shipped."): Summarizer & {
   calls: DigestInput[];
