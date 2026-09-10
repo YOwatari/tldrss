@@ -9,6 +9,31 @@ function escapeXml(text: string): string {
     .replaceAll("'", "&apos;");
 }
 
+function digestTitleOf(feedTitle: string): string {
+  return `Daily Digest: ${feedTitle}`;
+}
+
+/**
+ * A valid RSS 2.0 channel with no `<item>`, served while the digest of the day
+ * is still being generated. Readers accept it as a healthy subscription and
+ * post nothing, so the first crawl never shows an error.
+ */
+export function buildEmptyChannelXml(params: {
+  requestUrl: string;
+  feedTitle: string;
+}): string {
+  const digestTitle = digestTitleOf(params.feedTitle);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>${escapeXml(digestTitle)}</title>
+    <link>${escapeXml(params.requestUrl)}</link>
+    <description>${escapeXml(`Daily digest for ${params.feedTitle}`)}</description>
+  </channel>
+</rss>`;
+}
+
 export function buildRssXml(params: {
   requestUrl: string;
   feedUrl: string;
@@ -19,7 +44,7 @@ export function buildRssXml(params: {
   now?: Date;
 }): string {
   const now = params.now ?? new Date();
-  const digestTitle = `Daily Digest: ${params.feedTitle}`;
+  const digestTitle = digestTitleOf(params.feedTitle);
   // Readers deduplicate by guid, so the languages must not share one: two
   // subscriptions to the same feed would otherwise collapse into one item.
   const digestGuid = `${params.feedUrl}#${now.toISOString().slice(0, 10)}#${params.language}`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRssXml } from "../../src/digest/rss";
+import { buildEmptyChannelXml, buildRssXml } from "../../src/digest/rss";
 
 describe("buildRssXml", () => {
   it("builds valid rss with one digest item", () => {
@@ -48,5 +48,31 @@ describe("buildRssXml", () => {
       "&lt;a href=&quot;https://source.example/1&quot;&gt;[1]&lt;/a&gt;",
     );
     expect(xml).not.toContain("<description>* Something <a ");
+  });
+});
+
+describe("buildEmptyChannelXml", () => {
+  const params = {
+    requestUrl: "https://worker.example/feed?url=https://source.example/rss.xml",
+    feedTitle: "Example Feed",
+  };
+
+  it("builds a valid rss 2.0 channel with no item", () => {
+    const xml = buildEmptyChannelXml(params);
+
+    expect(xml).toContain('<rss version="2.0">');
+    expect(xml).toContain("<channel>");
+    expect(xml).not.toContain("<item>");
+  });
+
+  it("names the channel after the feed it stands in for", () => {
+    expect(buildEmptyChannelXml(params)).toContain("Daily Digest: Example Feed");
+  });
+
+  it("escapes the feed title", () => {
+    const xml = buildEmptyChannelXml({ ...params, feedTitle: "A & B <b>" });
+
+    expect(xml).toContain("A &amp; B &lt;b&gt;");
+    expect(xml).not.toContain("<b>");
   });
 });
