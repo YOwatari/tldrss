@@ -11,8 +11,17 @@ const ALLOWED_TAGS = new Set(["p", "h3", "ul", "li", "a", "strong", "br"]);
 const VOID_TAGS = new Set(["br"]);
 
 /**
+ * A self-closed `<script/>` opens nothing, so only the tag goes. An html
+ * parser would read it as an opening tag and swallow the rest of the document,
+ * but here that would cost the digest every entry after a single stray tag,
+ * and removing the tag alone leaves nothing executable behind either way.
+ */
+const SELF_CLOSED_RAW_TEXT_PATTERN = /<(?:script|style)\b(?:"[^"]*"|'[^']*'|[^>"'])*\/>/gi;
+
+/**
  * Elements whose content is not markup: dropping the tags alone would leave
- * the script body as visible text, so both go.
+ * the script body as visible text, so both go. A tag left unterminated takes
+ * the rest of the answer with it — everything after it is script body.
  */
 const RAW_TEXT_PATTERN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 
@@ -107,6 +116,7 @@ function closeDownTo(stack: string[], tag: string): string {
  */
 export function sanitizeLlmHtml(raw: string): string {
   const source = raw
+    .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
     .replace(RAW_TEXT_PATTERN, "")
     .replace(DECLARATION_PATTERN, "")
     .replace(CODE_FENCE_PATTERN, "");

@@ -29,8 +29,18 @@ describe("sanitizeLlmHtml (disallowed markup)", () => {
     expect(sanitizeLlmHtml("<p>Safe</p><script>alert('xss')</script>")).toBe("<p>Safe</p>");
   });
 
-  it("removes an unterminated script element", () => {
+  it("removes an unterminated script element, content and all", () => {
     expect(sanitizeLlmHtml("<p>Safe</p><script>alert('xss')")).toBe("<p>Safe</p>");
+  });
+
+  it("removes a self-closed script element without dropping what follows", () => {
+    expect(sanitizeLlmHtml("<p>Before</p><script/><p>After</p>")).toBe(
+      "<p>Before</p><p>After</p>",
+    );
+  });
+
+  it("removes a self-closed style element with attributes", () => {
+    expect(sanitizeLlmHtml('<style type="text/css" /><p>After</p>')).toBe("<p>After</p>");
   });
 
   it("removes a style element along with its content", () => {
