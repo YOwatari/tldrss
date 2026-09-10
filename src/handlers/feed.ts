@@ -125,13 +125,14 @@ async function generateDigest(
   // rejection would be an unhandled one. KV itself can fail, so acquiring and
   // releasing the lock are inside the guard too.
   try {
-    if (!(await acquireGenerationLock(env.DIGEST_CACHE, ref))) return;
+    const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref);
+    if (!lockToken) return;
 
     try {
       const digestXml = await buildDigest(env, ref, feedUrl, requestUrl);
       await putDigest(env.DIGEST_CACHE, ref, digestXml);
     } finally {
-      await releaseGenerationLock(env.DIGEST_CACHE, ref);
+      await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
     }
   } catch (error) {
     // Private feed URLs carry credentials in the query string, so only the
