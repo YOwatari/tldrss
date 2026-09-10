@@ -11,7 +11,7 @@ export function buildRssXml(params: {
   requestUrl: string;
   feedUrl: string;
   feedTitle: string;
-  /** Digest body as an HTML fragment; see `renderSummaryHtml`. */
+  /** Digest body as an HTML fragment; see `renderDigestHtml`. */
   summaryHtml: string;
   now?: Date;
 }): string {
