@@ -153,6 +153,19 @@ describe("worker fetch", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("returns 502 when the feed request itself fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Network connection lost.");
+      }),
+    );
+
+    const response = await callWorker({ ...bindings, AI: stubAi().ai });
+
+    expect(response.status).toBe(502);
+  });
+
   it("returns 502 when the upstream feed fails", async () => {
     stubFeedFetch(() => new Response("boom", { status: 500 }));
 

@@ -41,18 +41,18 @@ export default {
       return new Response(cached, { headers: XML_HEADERS });
     }
 
-    const feedResponse = await fetch(parsedFeedUrl.toString());
-    if (!feedResponse.ok) {
-      return new Response(`Failed to fetch feed: ${feedResponse.status}`, { status: 502 });
-    }
-
+    // Everything that can go wrong upstream — DNS, connection, redirects, a
+    // malformed body — is reported as 502 rather than escaping as a 500.
     let feed: ParsedFeed;
     try {
+      const feedResponse = await fetch(parsedFeedUrl.toString());
+      if (!feedResponse.ok) {
+        return new Response(`Failed to fetch feed: ${feedResponse.status}`, { status: 502 });
+      }
       feed = parseFeed(await feedResponse.text());
     } catch (error) {
-      // A malformed body is an upstream problem, so report it like a failed fetch.
-      console.error("Failed to parse feed", parsedFeedUrl.toString(), error);
-      return new Response("Failed to parse feed", { status: 502 });
+      console.error("Failed to read feed", parsedFeedUrl.toString(), error);
+      return new Response("Failed to read feed", { status: 502 });
     }
 
     const recentEntries = filterEntriesFromLast24Hours(feed.items);
