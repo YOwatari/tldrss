@@ -1,5 +1,9 @@
 import { buildRssXml } from "./digest/rss";
-import { summarizeEntries } from "./digest/summarize";
+import {
+  DEFAULT_LANGUAGE,
+  type DigestLanguage,
+  summarizeEntries,
+} from "./digest/summarize";
 import { filterEntriesFromLast24Hours } from "./feed/filter";
 import { type ParsedFeed, parseFeed } from "./feed/parse";
 
@@ -12,8 +16,19 @@ export type Env = {
 
 const XML_HEADERS = { "content-type": "application/rss+xml; charset=utf-8" };
 
-function cacheKey(feedUrl: string, now = new Date()): string {
-  return `digest:${now.toISOString().slice(0, 10)}:${feedUrl}`;
+/**
+ * Languages accepted in the `lang` query parameter. Omitting it keeps the
+ * default, so only the non-default languages have to be listed here.
+ */
+const REQUESTABLE_LANGUAGES = ["ja"] as const satisfies readonly DigestLanguage[];
+
+function isRequestableLanguage(value: string): value is (typeof REQUESTABLE_LANGUAGES)[number] {
+  return (REQUESTABLE_LANGUAGES as readonly string[]).includes(value);
+}
+
+// Digests of the same feed differ per language, so the language is part of the key.
+function cacheKey(feedUrl: string, language: DigestLanguage, now = new Date()): string {
+  return `digest:${now.toISOString().slice(0, 10)}:${language}:${feedUrl}`;
 }
 
 export default {
@@ -35,7 +50,16 @@ export default {
       return new Response("Invalid url query parameter", { status: 400 });
     }
 
-    const key = cacheKey(parsedFeedUrl.toString());
+    const requestedLanguage = requestUrl.searchParams.get("lang");
+    if (requestedLanguage !== null && !isRequestableLanguage(requestedLanguage)) {
+      return new Response(
+        `Unsupported lang query parameter. Supported: ${REQUESTABLE_LANGUAGES.join(", ")}`,
+        { status: 400 },
+      );
+    }
+    const language: DigestLanguage = requestedLanguage ?? DEFAULT_LANGUAGE;
+
+    const key = cacheKey(parsedFeedUrl.toString(), language);
     const cached = await env.DIGEST_CACHE.get(key);
     if (cached) {
       return new Response(cached, { headers: XML_HEADERS });
@@ -69,6 +93,7 @@ export default {
             model: env.AI_MODEL,
             feedTitle,
             entries: recentEntries,
+            language,
           });
 
     const digestXml = buildRssXml({

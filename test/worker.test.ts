@@ -94,7 +94,7 @@ describe("worker fetch", () => {
     expect(run).toHaveBeenCalledTimes(1);
 
     const cached = await bindings.DIGEST_CACHE.get(
-      `digest:${new Date().toISOString().slice(0, 10)}:${FEED_URL}`,
+      `digest:${new Date().toISOString().slice(0, 10)}:en:${FEED_URL}`,
     );
     expect(cached).toBe(body);
   });
@@ -190,5 +190,45 @@ describe("worker fetch", () => {
     const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(502);
+  });
+});
+
+describe("worker fetch (language)", () => {
+  it("returns an English digest by default", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    await callWorker({ ...bindings, AI: ai });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("returns a Japanese digest for lang=ja", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=ja`);
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("日本語");
+  });
+
+  it("returns 400 for an unsupported language", async () => {
+    const { ai, run } = stubAi();
+
+    const response = await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=fr`);
+
+    expect(response.status).toBe(400);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("caches each language separately", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai };
+
+    await callWorker(env);
+    await callWorker(env, `${WORKER_URL}&lang=ja`);
+
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });

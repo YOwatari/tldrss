@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AI_MODEL,
+  MAX_BULLET_CHARS,
   MAX_EXCERPT_CHARS,
   MAX_PROMPT_ENTRIES,
   buildDigestPrompt,
@@ -114,5 +115,44 @@ describe("summarizeEntries", () => {
     await expect(
       summarizeEntries({ ai, feedTitle: "Example Feed", entries }),
     ).rejects.toThrow(/Workers AI/);
+  });
+});
+
+describe("digest language", () => {
+  it("prompts in English by default", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries);
+
+    expect(prompt).toContain("Create a concise daily digest");
+    expect(prompt).not.toContain("日本語");
+  });
+
+  it("instructs the model to write the digest in Japanese when asked", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries, "ja");
+
+    expect(prompt).toContain("日本語");
+  });
+
+  it("sends an English system prompt by default", async () => {
+    const { ai, run } = stubAi({ response: "ok" });
+
+    await summarizeEntries({ ai, feedTitle: "Example Feed", entries });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("sends a Japanese system prompt for the ja language", async () => {
+    const { ai, run } = stubAi({ response: "ok" });
+
+    await summarizeEntries({ ai, feedTitle: "Example Feed", entries, language: "ja" });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("日本語");
+  });
+});
+
+describe("digest brevity", () => {
+  it("caps how long each bullet may be", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries);
+
+    expect(prompt).toContain(`${MAX_BULLET_CHARS}`);
   });
 });
