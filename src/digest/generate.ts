@@ -71,8 +71,8 @@ export function digestLinksOf(origin: string, ref: DigestRef): DigestLinks {
  * by hand, or a crawl arriving while the morning run is still working, must not
  * pay for the same model call twice.
  *
- * Failures are raised rather than logged: what a failed digest means differs
- * per caller, and both of them have somewhere to put it.
+ * Build and storage failures are raised rather than logged: what a failed
+ * digest means differs per caller, and both of them have somewhere to put it.
  */
 export async function generateDigest(params: GenerateDigestParams): Promise<GenerationOutcome> {
   const { env, summarizer, ref, feedUrl, links, now } = params;
@@ -86,7 +86,12 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
     const digest = await buildDigest(env, summarizer, ref, feedUrl, now);
     await storeDigest(env, digest, links);
   } finally {
-    await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
+    try {
+      await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
+    } catch (error) {
+      const kind = error instanceof Error ? error.name : typeof error;
+      console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
+    }
   }
 
   return "generated";

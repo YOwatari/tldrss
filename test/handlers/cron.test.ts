@@ -84,6 +84,17 @@ function digestOf(hash: string, date = JST_DATE): Promise<string | null> {
   return kv.get(digestCacheKey({ hash, date, language: DEFAULT_LANGUAGE }));
 }
 
+function cacheWithFailedRelease(): KVNamespace {
+  return {
+    get: kv.get.bind(kv),
+    put: kv.put.bind(kv),
+    list: kv.list.bind(kv),
+    delete: async () => {
+      throw new Error("KV delete unavailable");
+    },
+  } as unknown as KVNamespace;
+}
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -117,6 +128,56 @@ describe("handleScheduled", () => {
     await expect(digestOf(hash, "2026-09-09")).resolves.toBeNull();
     await expect(digestOf(hash)).resolves.toContain(`/digest/${hash}/${JST_DATE}`);
   });
+
+  it("counts a stored digest as generated even when releasing its lock fails", async () => {
+    const fetched = stubFeedFetch();
+    const [hash] = await register("https://a.example/rss.xml");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const summarizer = fakeSummarizer();
+    const env = envWith({ DIGEST_CACHE: cacheWithFailedRelease() });
+
+    const summary = await run(env, summarizer);
+
+    expect(summary).toMatchObject({ total: 1, generated: 1, skipped: 0, failed: 0 });
+    await expect(digestOf(hash)).resolves.toContain("<rss");
+    expect(errors.mock.calls).toEqual([
+      [`Failed to release generation lock for ${hash} (Error)`],
+    ]);
+
+    const repeated = await run(env, summarizer);
+
+    expect(repeated).toMatchObject({ total: 1, generated: 0, skipped: 1, failed: 0 });
+    expect(summarizer.calls).toHaveLength(1);
+    expect(fetched).toEqual(["https://a.example/rss.xml"]);
+  });
+
+  it.each(["build", "store"])(
+    "reports the original %s error even when releasing the lock also fails",
+    async (stage) => {
+      stubFeedFetch();
+      const [hash] = await register("https://a.example/rss.xml");
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const generationError = new TypeError("Generation failed");
+      const cache = cacheWithFailedRelease();
+      if (stage === "build") {
+        vi.stubGlobal("fetch", vi.fn().mockRejectedValue(generationError));
+      } else {
+        cache.put = async (key, value, options) => {
+          if (key.startsWith("digest:")) throw generationError;
+          await kv.put(key, value, options);
+        };
+      }
+
+      const summary = await run(envWith({ DIGEST_CACHE: cache }), fakeSummarizer());
+
+      expect(summary).toMatchObject({ total: 1, generated: 0, skipped: 0, failed: 1 });
+      await expect(digestOf(hash)).resolves.toBeNull();
+      expect(errors.mock.calls).toEqual([
+        [`Failed to release generation lock for ${hash} (Error)`],
+        [`Failed to generate digest for ${hash} (TypeError)`],
+      ]);
+    },
+  );
 
   it("keeps generating the other digests when one feed fails", async () => {
     stubFeedFetch(["https://broken.example/rss.xml"]);
