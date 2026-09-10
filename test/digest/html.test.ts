@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderDigestHtml } from "../../src/digest/references";
+import { renderDigestHtml } from "../../src/digest/html";
 
 const entries = [
   { title: "First article", link: "https://example.com/1" },

@@ -101,7 +101,7 @@ function closeDownTo(stack: string[], tag: string): string {
  * text escaped.
  *
  * The renderer builds the digest body itself and does not need this — see
- * `digest/references.ts`. It is the guard on the one path where the model's
+ * `digest/html.ts`. It is the guard on the one path where the model's
  * own formatting reaches the reader, so nothing the model writes has to be
  * trusted to be markup, or to be safe.
  */

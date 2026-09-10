@@ -4,7 +4,7 @@ import {
   type DigestLanguage,
   isDigestLanguage,
 } from "../digest/language";
-import { renderDigestHtml } from "../digest/references";
+import { renderDigestHtml } from "../digest/html";
 import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
 import { noRecentEntriesText } from "../digest/text";
 import { type Env, maxEntriesOf } from "../env";
