@@ -1,15 +1,17 @@
-import { renderDigestHtml } from "../digest/references";
-import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
 import {
   DEFAULT_LANGUAGE,
+  DIGEST_LANGUAGES,
   type DigestLanguage,
-  noRecentEntriesText,
-  selectPromptEntries,
-  summarizeEntries,
-} from "../digest/summarize";
-import type { Env } from "../env";
-import { filterEntriesFromLast24Hours } from "../feed/filter";
+  isDigestLanguage,
+} from "../digest/language";
+import { renderDigestHtml } from "../digest/references";
+import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
+import { noRecentEntriesText } from "../digest/text";
+import { type Env, maxEntriesOf } from "../env";
 import { parseFeed } from "../feed/parse";
+import { selectRecentEntries } from "../feed/select";
+import type { Summarizer } from "../llm/summarizer";
+import { createWorkersAiSummarizer } from "../llm/workers-ai";
 import { sha256Hex } from "../hash";
 import { getDigest, putDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
@@ -24,16 +26,6 @@ const XML_HEADERS = {
   "content-type": "application/xml; charset=utf-8",
   "cache-control": "public, max-age=300",
 };
-
-/**
- * Languages accepted in the `lang` query parameter. The default is listed too,
- * so a reader can pin the language explicitly instead of relying on the default.
- */
-const REQUESTABLE_LANGUAGES = ["en", "ja"] as const satisfies readonly DigestLanguage[];
-
-function isRequestableLanguage(value: string): value is (typeof REQUESTABLE_LANGUAGES)[number] {
-  return (REQUESTABLE_LANGUAGES as readonly string[]).includes(value);
-}
 
 function xmlResponse(xml: string): Response {
   return new Response(xml, { headers: XML_HEADERS });
@@ -77,9 +69,9 @@ export async function handleFeed(
   }
 
   const requestedLanguage = requestUrl.searchParams.get("lang");
-  if (requestedLanguage !== null && !isRequestableLanguage(requestedLanguage)) {
+  if (requestedLanguage !== null && !isDigestLanguage(requestedLanguage)) {
     return new Response(
-      `Unsupported lang query parameter. Supported: ${REQUESTABLE_LANGUAGES.join(", ")}`,
+      `Unsupported lang query parameter. Supported: ${DIGEST_LANGUAGES.join(", ")}`,
       { status: 400 },
     );
   }
@@ -158,27 +150,32 @@ async function buildDigest(
   }
 
   const feed = parseFeed(await feedResponse.text());
-  const recentEntries = filterEntriesFromLast24Hours(feed.items);
   const feedTitle = feed.title ?? feedUrl.host;
+  const selection = selectRecentEntries(feed.items, { maxEntries: maxEntriesOf(env) });
 
-  const summary =
-    recentEntries.length === 0
-      ? noRecentEntriesText(ref.language)
-      : await summarizeEntries({
-          ai: env.AI,
-          model: env.AI_MODEL,
-          feedTitle,
-          entries: recentEntries,
-          language: ref.language,
-        });
+  const summarizer: Summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
+
+  const summaryHtml =
+    selection.entries.length === 0
+      ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
+      : renderDigestHtml(
+          await summarizer.summarize({
+            feedTitle,
+            entries: selection.entries,
+            availableCount: selection.availableCount,
+            language: ref.language,
+          }),
+          // Reference markers are numbered against the list the prompt used.
+          selection.entries,
+          ref.language,
+        );
 
   return buildRssXml({
     publicUrl,
     feedHash: ref.hash,
     digestDate: ref.date,
     feedTitle,
-    // Reference markers are numbered against the same list the prompt used.
-    summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries), ref.language),
+    summaryHtml,
     language: ref.language,
   });
 }

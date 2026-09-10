@@ -22,6 +22,16 @@ function rssWithEntry(pubDate: string): string {
   return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title><item><title>Entry 1</title><link>${FEED_ORIGIN}/1</link><pubDate>${pubDate}</pubDate><description>Hello</description></item></channel></rss>`;
 }
 
+function rssWithEntries(count: number, pubDate: string): string {
+  const items = Array.from(
+    { length: count },
+    (_, index) =>
+      `<item><title>Entry ${index + 1}</title><link>${FEED_ORIGIN}/${index + 1}</link><pubDate>${pubDate}</pubDate><description>Body ${index + 1}</description></item>`,
+  ).join("");
+
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title>${items}</channel></rss>`;
+}
+
 function atomWithEntry(updated: string): string {
   return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Atom Feed</title><entry><title>Atom Entry</title><link rel="alternate" href="${FEED_ORIGIN}/atom-1"/><updated>${updated}</updated><summary>Atom summary</summary></entry></feed>`;
 }
@@ -293,6 +303,21 @@ describe("GET /feed (cache miss)", () => {
   });
 });
 
+describe("GET /feed (entry cap)", () => {
+  it("summarizes at most MAX_ENTRIES entries and says how many were dropped", async () => {
+    stubFeedFetch(() => new Response(rssWithEntries(4, hourAgo().toUTCString())));
+    const { ai, run } = stubAi("- [1] first");
+
+    await callWorker({ ...bindings, AI: ai, MAX_ENTRIES: "2" });
+
+    const prompt = run.mock.calls[0][1].messages[1].content;
+    expect(prompt).toContain("1. Entry 1");
+    expect(prompt).toContain("2. Entry 2");
+    expect(prompt).not.toContain("3. Entry 3");
+    expect(prompt).toContain("2 of 4");
+  });
+});
+
 describe("GET /feed (cache hit)", () => {
   it("serves the cached digest without hitting the feed or the model again", async () => {
     const calls = stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
@@ -422,8 +447,11 @@ describe("GET /feed (upstream failures)", () => {
   it("retries the model call on the next request after it failed", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Both attempts of the first request fail; see `workers-ai.ts` for the
+    // in-request retry.
     const run = vi
       .fn()
+      .mockRejectedValueOnce(new Error("model unavailable"))
       .mockRejectedValueOnce(new Error("model unavailable"))
       .mockResolvedValue({ response: "- summary" });
     const env = { ...bindings, AI: { run } as unknown as Ai };
@@ -431,7 +459,7 @@ describe("GET /feed (upstream failures)", () => {
     await callWorker(env);
     await callWorker(env);
 
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(3);
     await expect(storedDigest()).resolves.toMatchObject({
       value: expect.stringContaining("- summary"),
     });

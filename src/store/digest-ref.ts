@@ -1,4 +1,4 @@
-import type { DigestLanguage } from "../digest/summarize";
+import type { DigestLanguage } from "../digest/language";
 
 /** Identifies one digest: a feed, the JST day it covers, and its language. */
 export type DigestRef = {

@@ -1,9 +1,6 @@
 import type { FeedEntry } from "../feed/parse";
-import {
-  DEFAULT_LANGUAGE,
-  type DigestLanguage,
-  untitledEntryText,
-} from "./summarize";
+import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
+import { untitledEntryText } from "./text";
 
 /**
  * `[3] Something happened.` — the shape each bullet of the model's answer is
