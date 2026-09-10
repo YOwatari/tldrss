@@ -161,6 +161,50 @@ describe("parseFeed (namespaced extensions)", () => {
   });
 });
 
+const ATOM_PREFIXED_WITH_EXTENSIONS = `<?xml version="1.0" encoding="utf-8"?>
+<atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <media:title>Media feed title</media:title>
+  <atom:title>Prefixed Feed</atom:title>
+  <atom:entry>
+    <media:title>Media title</media:title>
+    <atom:title>Article title</atom:title>
+    <media:content url="https://example.org/video.mp4"/>
+    <atom:content>Article content</atom:content>
+    <media:link href="https://example.org/media-link"/>
+    <atom:link rel="alternate" href="https://example.org/article"/>
+    <atom:updated>2026-09-10T02:00:00Z</atom:updated>
+  </atom:entry>
+</atom:feed>`;
+
+const RSS_WITH_COMPARISON = `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Math</title><item>
+  <title>Inequalities</title>
+  <link>https://example.com/math</link>
+  <pubDate>Wed, 09 Sep 2026 10:00:00 GMT</pubDate>
+  <description>1 &lt; 2 and 3 &gt; 1</description>
+</item></channel></rss>`;
+
+describe("parseFeed (prefixed Atom with extensions)", () => {
+  it("prefers the container's own prefix over an extension prefix", () => {
+    const feed = parseFeed(ATOM_PREFIXED_WITH_EXTENSIONS);
+
+    expect(feed.title).toBe("Prefixed Feed");
+    expect(feed.items[0]).toMatchObject({
+      title: "Article title",
+      content: "Article content",
+      link: "https://example.org/article",
+    });
+  });
+});
+
+describe("parseFeed (plain text that looks like markup)", () => {
+  it("keeps comparison operators in plain-text descriptions", () => {
+    const [entry] = parseFeed(RSS_WITH_COMPARISON).items;
+
+    expect(entry.contentSnippet).toBe("1 < 2 and 3 > 1");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");

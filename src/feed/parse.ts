@@ -50,6 +50,11 @@ function localName(name: string): string {
   return separator === -1 ? name : name.slice(separator + 1);
 }
 
+function prefixOf(name: string): string {
+  const separator = name.indexOf(":");
+  return separator === -1 ? "" : name.slice(0, separator);
+}
+
 function isOrderedNode(value: unknown): value is OrderedNode {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -69,16 +74,21 @@ function attributesOf(node: OrderedNode): Record<string, string> {
  * so `<content>` beats a `<media:content>` extension that happens to share its
  * local name, while prefixed documents (`<atom:entry>`) and prefixed RSS
  * extensions (`content:encoded`) both still resolve.
+ *
+ * When only local names match, children carrying the container's own prefix win:
+ * inside `<atom:entry>`, `<atom:title>` beats a `<media:title>` extension.
  */
-function findAll(nodes: OrderedNode[], name: string): OrderedNode[] {
+function findAll(nodes: OrderedNode[], name: string, preferredPrefix = ""): OrderedNode[] {
   const exact = nodes.filter((node) => tagName(node) === name);
   if (exact.length > 0) return exact;
 
-  return nodes.filter((node) => localName(tagName(node)) === name);
+  const byLocalName = nodes.filter((node) => localName(tagName(node)) === name);
+  const preferred = byLocalName.filter((node) => prefixOf(tagName(node)) === preferredPrefix);
+  return preferred.length > 0 ? preferred : byLocalName;
 }
 
-function find(nodes: OrderedNode[], name: string): OrderedNode | undefined {
-  return findAll(nodes, name)[0];
+function find(nodes: OrderedNode[], name: string, preferredPrefix = ""): OrderedNode | undefined {
+  return findAll(nodes, name, preferredPrefix)[0];
 }
 
 /** Concatenates the text of a child list, descending into nested markup. */
@@ -99,9 +109,13 @@ function textOf(nodes: OrderedNode[]): string {
   return parts.join(" ").trim();
 }
 
-function firstText(nodes: OrderedNode[], names: string[]): string | undefined {
+function firstText(
+  nodes: OrderedNode[],
+  names: string[],
+  preferredPrefix = "",
+): string | undefined {
   for (const name of names) {
-    const node = find(nodes, name);
+    const node = find(nodes, name, preferredPrefix);
     if (!node) continue;
     const value = textOf(childrenOf(node));
     if (value.length > 0) return value;
@@ -113,8 +127,8 @@ function firstText(nodes: OrderedNode[], names: string[]): string | undefined {
  * RSS keeps the URL in the element text; Atom keeps it in a `href` attribute and
  * may repeat `<link>` for other relations (`self`, `edit`, enclosures).
  */
-function extractLink(nodes: OrderedNode[]): string | undefined {
-  const links = findAll(nodes, "link");
+function extractLink(nodes: OrderedNode[], preferredPrefix = ""): string | undefined {
+  const links = findAll(nodes, "link", preferredPrefix);
 
   for (const link of links) {
     const { href, rel } = attributesOf(link);
@@ -129,9 +143,15 @@ function extractLink(nodes: OrderedNode[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Only markup-shaped constructs are stripped: entities are already decoded by
+ * this point, so plain text such as "1 < 2 and 3 > 1" must survive intact.
+ */
+const HTML_TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
+
 function stripHtml(html: string): string {
   return html
-    .replaceAll(/<[^>]*>/g, " ")
+    .replaceAll(HTML_TAG, " ")
     .replaceAll(/&nbsp;/g, " ")
     .replaceAll(/\s+/g, " ")
     .trim();
@@ -145,13 +165,18 @@ function toIsoDate(dateText: string | undefined): string | undefined {
 
 function toEntry(entry: OrderedNode): FeedEntry {
   const fields = childrenOf(entry);
-  const pubDate = firstText(fields, ["pubDate", "published", "updated", "dc:date", "date"]);
-  const summary = firstText(fields, ["description", "summary"]);
-  const content = firstText(fields, ["content:encoded", "content"]);
+  const prefix = prefixOf(tagName(entry));
+  const pubDate = firstText(
+    fields,
+    ["pubDate", "published", "updated", "dc:date", "date"],
+    prefix,
+  );
+  const summary = firstText(fields, ["description", "summary"], prefix);
+  const content = firstText(fields, ["content:encoded", "content"], prefix);
 
   return {
-    title: firstText(fields, ["title"]),
-    link: extractLink(fields) ?? firstText(fields, ["guid", "id"]),
+    title: firstText(fields, ["title"], prefix),
+    link: extractLink(fields, prefix) ?? firstText(fields, ["guid", "id"], prefix),
     contentSnippet: summary === undefined ? undefined : stripHtml(summary),
     content,
     pubDate,
@@ -170,13 +195,15 @@ export function parseFeed(xml: string): ParsedFeed {
 
   const rss = find(roots, "rss");
   if (rss) {
-    const channel = find(childrenOf(rss), "channel");
+    const rssPrefix = prefixOf(tagName(rss));
+    const channel = find(childrenOf(rss), "channel", rssPrefix);
     if (channel) {
       const fields = childrenOf(channel);
+      const prefix = prefixOf(tagName(channel));
       return {
-        title: firstText(fields, ["title"]),
-        link: extractLink(fields),
-        items: findAll(fields, "item").map(toEntry),
+        title: firstText(fields, ["title"], prefix),
+        link: extractLink(fields, prefix),
+        items: findAll(fields, "item", prefix).map(toEntry),
       };
     }
   }
@@ -184,10 +211,11 @@ export function parseFeed(xml: string): ParsedFeed {
   const feed = find(roots, "feed");
   if (feed) {
     const fields = childrenOf(feed);
+    const prefix = prefixOf(tagName(feed));
     return {
-      title: firstText(fields, ["title"]),
-      link: extractLink(fields),
-      items: findAll(fields, "entry").map(toEntry),
+      title: firstText(fields, ["title"], prefix),
+      link: extractLink(fields, prefix),
+      items: findAll(fields, "entry", prefix).map(toEntry),
     };
   }
 
