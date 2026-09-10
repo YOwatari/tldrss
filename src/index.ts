@@ -39,7 +39,7 @@ async function summarizeWithGemini(prompt: string, env: Env): Promise<string> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const requestUrl = new URL(request.url);
     const feedUrl = requestUrl.searchParams.get("url");
 
@@ -88,4 +88,4 @@ export default {
 
     return new Response(digestXml, { headers: XML_HEADERS });
   },
-};
+} satisfies ExportedHandler<Env>;
