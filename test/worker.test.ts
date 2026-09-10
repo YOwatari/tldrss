@@ -7,7 +7,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { sha256Hex } from "../src/hash";
-import { jstDate } from "../src/time";
+import { jstDate, previousDate } from "../src/time";
 
 // `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
 // wrangler.toml, while Workers AI is stubbed per test (it would call out to the
@@ -68,8 +68,23 @@ async function digestOf(env: Env, url = WORKER_URL): Promise<string> {
 
 const hourAgo = () => new Date(Date.now() - 60 * 60 * 1000);
 
-const cacheKeyFor = async (feedUrl = FEED_URL, language = "en") =>
-  `digest:${await sha256Hex(feedUrl)}:${jstDate()}:${language}`;
+/**
+ * The digest KV entry for a feed, looked up by hash prefix rather than by a
+ * key rebuilt from the wall clock: recomputing the date here would disagree
+ * with the worker for a request made just before the JST boundary.
+ */
+async function storedDigest(
+  feedUrl = FEED_URL,
+  language = "en",
+): Promise<{ key: string; value: string } | null> {
+  const listed = await bindings.DIGEST_CACHE.list({
+    prefix: `digest:${await sha256Hex(feedUrl)}:`,
+  });
+  const key = listed.keys.map((entry) => entry.name).find((name) => name.endsWith(`:${language}`));
+  if (!key) return null;
+
+  return { key, value: (await bindings.DIGEST_CACHE.get(key)) ?? "" };
+}
 
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -154,9 +169,14 @@ describe("GET /feed (cache miss)", () => {
 
     await callWorker({ ...bindings, AI: ai });
 
-    const cached = await bindings.DIGEST_CACHE.get(await cacheKeyFor());
-    expect(cached).toContain("- summary");
-    expect(cached).toContain("Daily Digest: Test Feed");
+    const cached = await storedDigest();
+    // The date itself is covered by the `jstDate` unit tests; asserting the
+    // shape here keeps this test independent of when it runs.
+    expect(cached?.key).toMatch(
+      new RegExp(`^digest:${await sha256Hex(FEED_URL)}:\\d{4}-\\d{2}-\\d{2}:en$`),
+    );
+    expect(cached?.value).toContain("- summary");
+    expect(cached?.value).toContain("Daily Digest: Test Feed");
     expect(calls).toEqual([FEED_URL]);
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -242,12 +262,11 @@ describe("GET /feed (cache hit)", () => {
   });
 
   it("falls back to yesterday's digest when today's is missing", async () => {
+    // Frozen, so "yesterday" cannot shift between seeding KV and the request.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-10T03:00:00Z"));
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${new Date(
-      Date.parse(`${jstDate()}T00:00:00Z`) - 24 * 60 * 60 * 1000,
-    )
-      .toISOString()
-      .slice(0, 10)}:en`;
+    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${previousDate(jstDate())}:en`;
     await bindings.DIGEST_CACHE.put(yesterdayKey, "<rss>yesterday</rss>");
 
     const body = await (await callWorker({ ...bindings, AI: stubAi().ai })).text();
@@ -281,7 +300,7 @@ describe("GET /feed (upstream failures)", () => {
     const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(200);
-    await expect(bindings.DIGEST_CACHE.get(await cacheKeyFor())).resolves.toBeNull();
+    await expect(storedDigest()).resolves.toBeNull();
     errors.mockRestore();
   });
 
@@ -292,7 +311,7 @@ describe("GET /feed (upstream failures)", () => {
 
     await callWorker({ ...bindings, AI: ai });
 
-    await expect(bindings.DIGEST_CACHE.get(await cacheKeyFor())).resolves.toBeNull();
+    await expect(storedDigest()).resolves.toBeNull();
     expect(run).not.toHaveBeenCalled();
     errors.mockRestore();
   });
@@ -311,7 +330,7 @@ describe("GET /feed (upstream failures)", () => {
     await callWorker(env);
 
     expect(run).toHaveBeenCalledTimes(1);
-    await expect(bindings.DIGEST_CACHE.get(await cacheKeyFor())).resolves.not.toBeNull();
+    await expect(storedDigest()).resolves.not.toBeNull();
     errors.mockRestore();
   });
 
