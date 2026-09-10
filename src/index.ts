@@ -1,5 +1,12 @@
+import { renderDigestHtml } from "./digest/references";
 import { buildRssXml } from "./digest/rss";
-import { summarizeEntries } from "./digest/summarize";
+import {
+  DEFAULT_LANGUAGE,
+  type DigestLanguage,
+  noRecentEntriesText,
+  selectPromptEntries,
+  summarizeEntries,
+} from "./digest/summarize";
 import { filterEntriesFromLast24Hours } from "./feed/filter";
 import { type ParsedFeed, parseFeed } from "./feed/parse";
 
@@ -12,8 +19,19 @@ export type Env = {
 
 const XML_HEADERS = { "content-type": "application/rss+xml; charset=utf-8" };
 
-function cacheKey(feedUrl: string, now = new Date()): string {
-  return `digest:${now.toISOString().slice(0, 10)}:${feedUrl}`;
+/**
+ * Languages accepted in the `lang` query parameter. The default is listed too,
+ * so a reader can pin the language explicitly instead of relying on the default.
+ */
+const REQUESTABLE_LANGUAGES = ["en", "ja"] as const satisfies readonly DigestLanguage[];
+
+function isRequestableLanguage(value: string): value is (typeof REQUESTABLE_LANGUAGES)[number] {
+  return (REQUESTABLE_LANGUAGES as readonly string[]).includes(value);
+}
+
+// Digests of the same feed differ per language, so the language is part of the key.
+function cacheKey(feedUrl: string, language: DigestLanguage, now = new Date()): string {
+  return `digest:${now.toISOString().slice(0, 10)}:${language}:${feedUrl}`;
 }
 
 export default {
@@ -35,7 +53,16 @@ export default {
       return new Response("Invalid url query parameter", { status: 400 });
     }
 
-    const key = cacheKey(parsedFeedUrl.toString());
+    const requestedLanguage = requestUrl.searchParams.get("lang");
+    if (requestedLanguage !== null && !isRequestableLanguage(requestedLanguage)) {
+      return new Response(
+        `Unsupported lang query parameter. Supported: ${REQUESTABLE_LANGUAGES.join(", ")}`,
+        { status: 400 },
+      );
+    }
+    const language: DigestLanguage = requestedLanguage ?? DEFAULT_LANGUAGE;
+
+    const key = cacheKey(parsedFeedUrl.toString(), language);
     const cached = await env.DIGEST_CACHE.get(key);
     if (cached) {
       return new Response(cached, { headers: XML_HEADERS });
@@ -63,19 +90,22 @@ export default {
     const feedTitle = feed.title ?? parsedFeedUrl.host;
     const summary =
       recentEntries.length === 0
-        ? "No new entries were published in the last 24 hours."
+        ? noRecentEntriesText(language)
         : await summarizeEntries({
             ai: env.AI,
             model: env.AI_MODEL,
             feedTitle,
             entries: recentEntries,
+            language,
           });
 
     const digestXml = buildRssXml({
       requestUrl: request.url,
       feedUrl: parsedFeedUrl.toString(),
       feedTitle,
-      summary,
+      // Reference markers are numbered against the same list the prompt used.
+      summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries), language),
+      language,
     });
 
     await env.DIGEST_CACHE.put(key, digestXml, { expirationTtl: 60 * 60 });

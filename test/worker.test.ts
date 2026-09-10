@@ -94,7 +94,7 @@ describe("worker fetch", () => {
     expect(run).toHaveBeenCalledTimes(1);
 
     const cached = await bindings.DIGEST_CACHE.get(
-      `digest:${new Date().toISOString().slice(0, 10)}:${FEED_URL}`,
+      `digest:${new Date().toISOString().slice(0, 10)}:en:${FEED_URL}`,
     );
     expect(cached).toBe(body);
   });
@@ -130,6 +130,19 @@ describe("worker fetch", () => {
     expect(second).toBe(first);
     expect(calls).toEqual([FEED_URL]);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("says in Japanese that nothing was published when lang=ja", async () => {
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
+    stubFeedFetch(() => new Response(rssWithEntry(stale)));
+    const { ai, run } = stubAi();
+
+    const body = await (
+      await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=ja`)
+    ).text();
+
+    expect(body).toContain("24 時間以内に公開された新しいエントリはありません。");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("skips the model call when nothing was published in the last 24 hours", async () => {
@@ -190,5 +203,133 @@ describe("worker fetch", () => {
     const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(502);
+  });
+});
+
+describe("worker fetch (language)", () => {
+  it("returns an English digest by default", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    await callWorker({ ...bindings, AI: ai });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("returns a Japanese digest for lang=ja", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=ja`);
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("日本語");
+  });
+
+  it("returns 400 for an unsupported language", async () => {
+    const { ai, run } = stubAi();
+
+    const response = await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=fr`);
+
+    expect(response.status).toBe(400);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("caches each language separately", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai };
+
+    await callWorker(env);
+    await callWorker(env, `${WORKER_URL}&lang=ja`);
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("worker fetch (article links)", () => {
+  it("heads each bullet with a link to the article it summarizes", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.").ai })
+    ).text();
+
+    expect(body).toContain(`&lt;a href=&quot;${FEED_ORIGIN}/1&quot;&gt;Entry 1&lt;/a&gt;`);
+    expect(body).toContain("It shipped.");
+  });
+
+  it("drops a bullet citing an entry that does not exist", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.\n[7] Invented.").ai })
+    ).text();
+
+    expect(body).toContain("It shipped.");
+    expect(body).not.toContain("Invented.");
+  });
+
+  it("keeps the model's text rather than serving an empty digest", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[7] Invented.").ai })
+    ).text();
+
+    expect(body).toContain("Invented.");
+  });
+});
+
+describe("worker fetch (explicit default language)", () => {
+  it("accepts the default language spelled out", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    const response = await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=en`);
+
+    expect(response.status).toBe(200);
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("serves lang=en from the same cache entry as no lang at all", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai };
+
+    await callWorker(env);
+    await callWorker(env, `${WORKER_URL}&lang=en`);
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("worker fetch (guid)", () => {
+  const guidOf = (xml: string) => /<guid[^>]*>([^<]*)<\/guid>/.exec(xml)?.[1];
+
+  it("gives the English and Japanese digests different guids", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi().ai };
+
+    const english = guidOf(await (await callWorker(env)).text());
+    const japanese = guidOf(await (await callWorker(env, `${WORKER_URL}&lang=ja`)).text());
+
+    expect(english).toBeDefined();
+    expect(english).not.toBe(japanese);
+  });
+});
+
+describe("worker fetch (untitled entries)", () => {
+  const untitledItem = (pubDate: string) =>
+    `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title><item><link>${FEED_ORIGIN}/1</link><pubDate>${pubDate}</pubDate><description>Hello</description></item></channel></rss>`;
+
+  it("labels an untitled entry in Japanese for lang=ja", async () => {
+    stubFeedFetch(() => new Response(untitledItem(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.").ai }, `${WORKER_URL}&lang=ja`)
+    ).text();
+
+    expect(body).toContain("(タイトルなし)");
+    expect(body).not.toContain("(untitled)");
   });
 });

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AI_MODEL,
+  MAX_BULLET_CHARS,
   MAX_EXCERPT_CHARS,
   MAX_PROMPT_ENTRIES,
   buildDigestPrompt,
+  selectPromptEntries,
   summarizeEntries,
 } from "../../src/digest/summarize";
 
@@ -108,11 +110,105 @@ describe("summarizeEntries", () => {
     );
   });
 
+  it("falls back in Japanese for a Japanese digest", async () => {
+    const { ai } = stubAi({ response: "   " });
+
+    await expect(
+      summarizeEntries({ ai, feedTitle: "Example Feed", entries, language: "ja" }),
+    ).resolves.toBe("要約を生成できませんでした。");
+  });
+
   it("throws when the model returns an unexpected shape", async () => {
     const { ai } = stubAi({ unexpected: true });
 
     await expect(
       summarizeEntries({ ai, feedTitle: "Example Feed", entries }),
     ).rejects.toThrow(/Workers AI/);
+  });
+});
+
+describe("digest language", () => {
+  it("prompts in English by default", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries);
+
+    expect(prompt).toContain("Create a concise daily digest");
+    expect(prompt).not.toContain("日本語");
+  });
+
+  it("instructs the model to write the digest in Japanese when asked", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries, "ja");
+
+    expect(prompt).toContain("日本語");
+  });
+
+  it("sends an English system prompt by default", async () => {
+    const { ai, run } = stubAi({ response: "ok" });
+
+    await summarizeEntries({ ai, feedTitle: "Example Feed", entries });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("sends a Japanese system prompt for the ja language", async () => {
+    const { ai, run } = stubAi({ response: "ok" });
+
+    await summarizeEntries({ ai, feedTitle: "Example Feed", entries, language: "ja" });
+
+    expect(run.mock.calls[0][1].messages[0].content).toContain("日本語");
+  });
+});
+
+describe("digest brevity", () => {
+  it("caps how long each bullet may be", () => {
+    const prompt = buildDigestPrompt("Example Feed", entries);
+
+    expect(prompt).toContain(`${MAX_BULLET_CHARS}`);
+  });
+});
+
+describe("selectPromptEntries", () => {
+  it("returns the newest entries in the order the prompt numbers them", () => {
+    const oldestFirst = Array.from({ length: MAX_PROMPT_ENTRIES + 2 }, (_, index) => ({
+      title: `Entry ${index + 1}`,
+      link: `https://example.com/${index + 1}`,
+      isoDate: new Date(Date.UTC(2026, 8, 1, index)).toISOString(),
+    }));
+
+    const selected = selectPromptEntries(oldestFirst);
+    const prompt = buildDigestPrompt("Example Feed", oldestFirst);
+
+    expect(selected).toHaveLength(MAX_PROMPT_ENTRIES);
+    // The numbering in the prompt has to match the position in this list, or
+    // the reference links would point at the wrong article.
+    selected.forEach((entry, index) => {
+      expect(prompt).toContain(`${index + 1}. ${entry.title}`);
+    });
+  });
+});
+
+describe("reference markers", () => {
+  it("asks the model to cite entry numbers in English", () => {
+    expect(buildDigestPrompt("Example Feed", entries)).toContain("square brackets");
+  });
+
+  it("asks the model to cite entry numbers in Japanese", () => {
+    expect(buildDigestPrompt("Example Feed", entries, "ja")).toContain("角かっこ");
+  });
+});
+
+describe("prompt for a short feed", () => {
+  const two = [
+    { title: "One", link: "https://example.com/1" },
+    { title: "Two", link: "https://example.com/2" },
+  ];
+
+  // Asking for 4-8 bullets while forbidding repeats and invented numbers is
+  // impossible for a feed this small, and pushes the model to make numbers up.
+  it("allows covering every entry in English", () => {
+    expect(buildDigestPrompt("Example Feed", two)).toContain("fewer than four");
+  });
+
+  it("allows covering every entry in Japanese", () => {
+    expect(buildDigestPrompt("Example Feed", two, "ja")).toContain("4 件未満");
   });
 });
