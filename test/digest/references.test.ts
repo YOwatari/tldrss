@@ -77,6 +77,21 @@ describe("renderDigestHtml", () => {
   });
 });
 
+describe("renderDigestHtml (untitled entries)", () => {
+  const untitled = [{ link: "https://example.com/1" }];
+
+  it("labels an untitled entry in English by default", () => {
+    expect(renderDigestHtml("[1] Summary.", untitled)).toContain("(untitled)");
+  });
+
+  it("labels an untitled entry in Japanese for a Japanese digest", () => {
+    const html = renderDigestHtml("[1] Summary.", untitled, "ja");
+
+    expect(html).toContain("(タイトルなし)");
+    expect(html).not.toContain("(untitled)");
+  });
+});
+
 describe("renderDigestHtml (unsafe urls)", () => {
   it.each(["javascript:alert(1)", "data:text/html,<script>x</script>", "vbscript:x"])(
     "renders the title as plain text for a %s link",

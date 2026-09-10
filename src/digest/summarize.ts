@@ -30,6 +30,8 @@ type PromptCopy = {
   noSummary: string;
   /** Shown when the feed published nothing worth summarizing. */
   noRecentEntries: string;
+  /** Heading for an entry the feed gave no title. */
+  untitledEntry: string;
 };
 
 const COPY: Record<DigestLanguage, PromptCopy> = {
@@ -56,6 +58,7 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     note: (included, total) => `Summarizing the ${included} of ${total} most recent entries.`,
     noSummary: "No summary generated.",
     noRecentEntries: "No new entries were published in the last 24 hours.",
+    untitledEntry: "(untitled)",
   },
   ja: {
     system:
@@ -81,8 +84,14 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
       `全 ${total} 件のうち、新しい方から ${included} 件を対象とします。`,
     noSummary: "要約を生成できませんでした。",
     noRecentEntries: "24 時間以内に公開された新しいエントリはありません。",
+    untitledEntry: "(タイトルなし)",
   },
 };
+
+/** Heading used when the feed gave an entry no title. */
+export function untitledEntryText(language: DigestLanguage = DEFAULT_LANGUAGE): string {
+  return COPY[language].untitledEntry;
+}
 
 /** Digest body for a feed with nothing recent enough to summarize. */
 export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE): string {

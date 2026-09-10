@@ -104,7 +104,7 @@ export default {
       feedUrl: parsedFeedUrl.toString(),
       feedTitle,
       // Reference markers are numbered against the same list the prompt used.
-      summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries)),
+      summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries), language),
       language,
     });
 

@@ -1,4 +1,9 @@
 import type { FeedEntry } from "../feed/parse";
+import {
+  DEFAULT_LANGUAGE,
+  type DigestLanguage,
+  untitledEntryText,
+} from "./summarize";
 
 /**
  * `[3] Something happened.` — the shape each bullet of the model's answer is
@@ -78,9 +83,9 @@ function safeHref(link: string | undefined): string | null {
   }
 }
 
-function renderItem(entry: FeedEntry, summary: string): string {
+function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
   // Title and url come from the feed, never from the model.
-  const title = escapeHtml(entry.title ?? "(untitled)");
+  const title = escapeHtml(entry.title ?? untitledEntryText(language));
   const href = safeHref(entry.link);
   const heading = href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
 
@@ -92,7 +97,11 @@ function renderItem(entry: FeedEntry, summary: string): string {
  * followed by one linked article per bullet, built from the feed rather than
  * from the model's own formatting.
  */
-export function renderDigestHtml(summary: string, entries: FeedEntry[]): string {
+export function renderDigestHtml(
+  summary: string,
+  entries: FeedEntry[],
+  language: DigestLanguage = DEFAULT_LANGUAGE,
+): string {
   const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
 
   // The model ignored the format, or there was nothing to summarize at all.
@@ -101,7 +110,7 @@ export function renderDigestHtml(summary: string, entries: FeedEntry[]): string 
   const items = entries
     .map((entry, index) => {
       const bullet = byEntry.get(index);
-      return bullet === undefined ? null : renderItem(entry, bullet);
+      return bullet === undefined ? null : renderItem(entry, bullet, language);
     })
     .filter((item) => item !== null);
 

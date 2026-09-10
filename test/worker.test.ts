@@ -317,3 +317,19 @@ describe("worker fetch (guid)", () => {
     expect(english).not.toBe(japanese);
   });
 });
+
+describe("worker fetch (untitled entries)", () => {
+  const untitledItem = (pubDate: string) =>
+    `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title><item><link>${FEED_ORIGIN}/1</link><pubDate>${pubDate}</pubDate><description>Hello</description></item></channel></rss>`;
+
+  it("labels an untitled entry in Japanese for lang=ja", async () => {
+    stubFeedFetch(() => new Response(untitledItem(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.").ai }, `${WORKER_URL}&lang=ja`)
+    ).text();
+
+    expect(body).toContain("(タイトルなし)");
+    expect(body).not.toContain("(untitled)");
+  });
+});
