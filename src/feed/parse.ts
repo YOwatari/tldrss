@@ -20,46 +20,91 @@ export type ParsedFeed = {
   items: FeedEntry[];
 };
 
-type XmlNode = Record<string, unknown>;
+/**
+ * With `preserveOrder`, every node is an object with exactly one tag key whose
+ * value is the ordered child list, plus an optional attribute bag under ":@".
+ * Text nodes use the "#text" key. Keeping document order matters for Atom
+ * `type="xhtml"` constructs, whose text is mixed with markup.
+ */
+type OrderedNode = Record<string, unknown>;
 
-const ATTRIBUTE_PREFIX = "@_";
+const ATTRIBUTES_KEY = ":@";
+const TEXT_KEY = "#text";
 
 const parser = new XMLParser({
+  preserveOrder: true,
   ignoreAttributes: false,
-  attributeNamePrefix: ATTRIBUTE_PREFIX,
+  attributeNamePrefix: "",
   parseTagValue: false,
   parseAttributeValue: false,
   trimValues: true,
 });
 
-function isXmlNode(value: unknown): value is XmlNode {
+function tagName(node: OrderedNode): string {
+  return Object.keys(node).find((key) => key !== ATTRIBUTES_KEY) ?? "";
+}
+
+/** `fast-xml-parser` keeps namespace prefixes, so `<atom:entry>` must match "entry" too. */
+function localName(name: string): string {
+  const separator = name.indexOf(":");
+  return separator === -1 ? name : name.slice(separator + 1);
+}
+
+function isOrderedNode(value: unknown): value is OrderedNode {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toArray(value: unknown): unknown[] {
-  if (value === undefined || value === null) return [];
-  return Array.isArray(value) ? value : [value];
+function childrenOf(node: OrderedNode): OrderedNode[] {
+  const value = node[tagName(node)];
+  return Array.isArray(value) ? value.filter(isOrderedNode) : [];
 }
 
-/** Reads the text content of a node, whether it is a bare string or an element with attributes. */
-function text(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = text(item);
-      if (found !== undefined) return found;
+function attributesOf(node: OrderedNode): Record<string, string> {
+  const attributes = node[ATTRIBUTES_KEY];
+  return isOrderedNode(attributes) ? (attributes as Record<string, string>) : {};
+}
+
+/**
+ * Matches on the full tag name first so prefixed RSS extensions such as
+ * `content:encoded` keep working, then falls back to the local name.
+ */
+function matches(node: OrderedNode, name: string): boolean {
+  const tag = tagName(node);
+  return tag === name || localName(tag) === name;
+}
+
+function findAll(nodes: OrderedNode[], name: string): OrderedNode[] {
+  return nodes.filter((node) => matches(node, name));
+}
+
+function find(nodes: OrderedNode[], name: string): OrderedNode | undefined {
+  return nodes.find((node) => matches(node, name));
+}
+
+/** Concatenates the text of a child list, descending into nested markup. */
+function textOf(nodes: OrderedNode[]): string {
+  const parts: string[] = [];
+
+  for (const node of nodes) {
+    const tag = tagName(node);
+    if (tag === TEXT_KEY) {
+      const value = node[TEXT_KEY];
+      if (typeof value === "string" && value.length > 0) parts.push(value);
+      continue;
     }
-    return undefined;
+    const nested = textOf(childrenOf(node));
+    if (nested.length > 0) parts.push(nested);
   }
-  if (isXmlNode(value)) return text(value["#text"]);
-  return undefined;
+
+  return parts.join(" ").trim();
 }
 
-function firstText(node: XmlNode, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const found = text(node[key]);
-    if (found !== undefined) return found;
+function firstText(nodes: OrderedNode[], names: string[]): string | undefined {
+  for (const name of names) {
+    const node = find(nodes, name);
+    if (!node) continue;
+    const value = textOf(childrenOf(node));
+    if (value.length > 0) return value;
   }
   return undefined;
 }
@@ -68,17 +113,20 @@ function firstText(node: XmlNode, keys: string[]): string | undefined {
  * RSS keeps the URL in the element text; Atom keeps it in a `href` attribute and
  * may repeat `<link>` for other relations (`self`, `edit`, enclosures).
  */
-function extractLink(value: unknown): string | undefined {
-  const candidates = toArray(value);
-  const hrefs = candidates.filter(isXmlNode).map((node) => ({
-    rel: text(node[`${ATTRIBUTE_PREFIX}rel`]),
-    href: text(node[`${ATTRIBUTE_PREFIX}href`]),
-  }));
+function extractLink(nodes: OrderedNode[]): string | undefined {
+  const links = findAll(nodes, "link");
 
-  const alternate = hrefs.find((link) => link.href && (link.rel === undefined || link.rel === "alternate"));
-  if (alternate?.href) return alternate.href;
+  for (const link of links) {
+    const { href, rel } = attributesOf(link);
+    if (href && (rel === undefined || rel === "alternate")) return href;
+  }
 
-  return text(candidates.find((candidate) => text(candidate) !== undefined));
+  for (const link of links) {
+    const value = textOf(childrenOf(link));
+    if (value.length > 0) return value;
+  }
+
+  return undefined;
 }
 
 function stripHtml(html: string): string {
@@ -95,14 +143,15 @@ function toIsoDate(dateText: string | undefined): string | undefined {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 }
 
-function toEntry(node: XmlNode): FeedEntry {
-  const pubDate = firstText(node, ["pubDate", "published", "updated", "dc:date", "date"]);
-  const summary = firstText(node, ["description", "summary"]);
-  const content = firstText(node, ["content:encoded", "content"]);
+function toEntry(entry: OrderedNode): FeedEntry {
+  const fields = childrenOf(entry);
+  const pubDate = firstText(fields, ["pubDate", "published", "updated", "dc:date", "date"]);
+  const summary = firstText(fields, ["description", "summary"]);
+  const content = firstText(fields, ["content:encoded", "content"]);
 
   return {
-    title: firstText(node, ["title"]),
-    link: extractLink(node["link"]) ?? firstText(node, ["guid", "id"]),
+    title: firstText(fields, ["title"]),
+    link: extractLink(fields) ?? firstText(fields, ["guid", "id"]),
     contentSnippet: summary === undefined ? undefined : stripHtml(summary),
     content,
     pubDate,
@@ -116,26 +165,29 @@ function toEntry(node: XmlNode): FeedEntry {
  */
 export function parseFeed(xml: string): ParsedFeed {
   const document = parser.parse(xml, true) as unknown;
-  if (!isXmlNode(document)) return { items: [] };
+  if (!Array.isArray(document)) return { items: [] };
+  const roots = document.filter(isOrderedNode);
 
-  const rss = document["rss"];
-  if (isXmlNode(rss)) {
-    const channel = rss["channel"];
-    if (isXmlNode(channel)) {
+  const rss = find(roots, "rss");
+  if (rss) {
+    const channel = find(childrenOf(rss), "channel");
+    if (channel) {
+      const fields = childrenOf(channel);
       return {
-        title: firstText(channel, ["title"]),
-        link: extractLink(channel["link"]),
-        items: toArray(channel["item"]).filter(isXmlNode).map(toEntry),
+        title: firstText(fields, ["title"]),
+        link: extractLink(fields),
+        items: findAll(fields, "item").map(toEntry),
       };
     }
   }
 
-  const feed = document["feed"];
-  if (isXmlNode(feed)) {
+  const feed = find(roots, "feed");
+  if (feed) {
+    const fields = childrenOf(feed);
     return {
-      title: firstText(feed, ["title"]),
-      link: extractLink(feed["link"]),
-      items: toArray(feed["entry"]).filter(isXmlNode).map(toEntry),
+      title: firstText(fields, ["title"]),
+      link: extractLink(fields),
+      items: findAll(fields, "entry").map(toEntry),
     };
   }
 

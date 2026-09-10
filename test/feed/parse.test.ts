@@ -88,6 +88,55 @@ describe("parseFeed (Atom)", () => {
   });
 });
 
+const ATOM_NAMESPACED = `<?xml version="1.0" encoding="utf-8"?>
+<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+  <atom:title>Namespaced Atom</atom:title>
+  <atom:link rel="alternate" href="https://example.org/"/>
+  <atom:entry>
+    <atom:title>Namespaced entry</atom:title>
+    <atom:link rel="alternate" href="https://example.org/ns-1"/>
+    <atom:updated>2026-09-10T02:00:00Z</atom:updated>
+    <atom:summary>Namespaced summary</atom:summary>
+  </atom:entry>
+</atom:feed>`;
+
+const ATOM_XHTML = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">XHTML <b>feed</b></div></title>
+  <entry>
+    <title type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">XHTML <b>entry</b></div></title>
+    <link rel="alternate" href="https://example.org/xhtml-1"/>
+    <updated>2026-09-10T02:00:00Z</updated>
+    <summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Nested summary</p></div></summary>
+  </entry>
+</feed>`;
+
+describe("parseFeed (Atom namespace prefixes)", () => {
+  it("reads a document that prefixes every element", () => {
+    const feed = parseFeed(ATOM_NAMESPACED);
+
+    expect(feed.title).toBe("Namespaced Atom");
+    expect(feed.link).toBe("https://example.org/");
+    expect(feed.items).toHaveLength(1);
+    expect(feed.items[0]).toMatchObject({
+      title: "Namespaced entry",
+      link: "https://example.org/ns-1",
+      contentSnippet: "Namespaced summary",
+      isoDate: "2026-09-10T02:00:00.000Z",
+    });
+  });
+});
+
+describe("parseFeed (Atom xhtml text constructs)", () => {
+  it("extracts text nested under an xhtml div", () => {
+    const feed = parseFeed(ATOM_XHTML);
+
+    expect(feed.title).toBe("XHTML feed");
+    expect(feed.items[0].title).toBe("XHTML entry");
+    expect(feed.items[0].contentSnippet).toBe("Nested summary");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");
