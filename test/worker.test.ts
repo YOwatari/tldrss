@@ -391,6 +391,39 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
+  it("serves 200 and stores nothing when the model call fails", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
+
+    const response = await callWorker({ ...bindings, AI: { run } as unknown as Ai });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<item>");
+    await expect(storedDigest()).resolves.toBeNull();
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("retries the model call on the next request after it failed", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("model unavailable"))
+      .mockResolvedValue({ response: "- summary" });
+    const env = { ...bindings, AI: { run } as unknown as Ai };
+
+    await callWorker(env);
+    await callWorker(env);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    await expect(storedDigest()).resolves.toMatchObject({
+      value: expect.stringContaining("- summary"),
+    });
+    errors.mockRestore();
+  });
+
   it("does not log credentials carried in the feed url", async () => {
     const secretUrl = "https://source.example/rss.xml?token=super-secret";
     stubFeedFetch(() => new Response("<rss><channel>"));
