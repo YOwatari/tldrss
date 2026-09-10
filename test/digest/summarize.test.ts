@@ -37,6 +37,20 @@ describe("buildDigestPrompt (bounds)", () => {
     expect(prompt).not.toContain("x".repeat(MAX_EXCERPT_CHARS + 1));
   });
 
+  it("keeps the newest entries when the feed is oldest-first", () => {
+    const oldestFirst = Array.from({ length: MAX_PROMPT_ENTRIES + 3 }, (_, index) => ({
+      title: `Entry ${index + 1}`,
+      link: `https://example.com/${index + 1}`,
+      isoDate: new Date(Date.UTC(2026, 8, 1, index)).toISOString(),
+    }));
+
+    const prompt = buildDigestPrompt("Example Feed", oldestFirst);
+
+    expect(prompt).toContain(`1. Entry ${oldestFirst.length}`);
+    expect(prompt).not.toContain("Entry 1\n");
+    expect(prompt).not.toContain("Entry 2\n");
+  });
+
   it("caps the number of entries and says how many were dropped", () => {
     const many = Array.from({ length: MAX_PROMPT_ENTRIES + 5 }, (_, index) => ({
       title: `Entry ${index + 1}`,

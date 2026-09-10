@@ -22,8 +22,16 @@ function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }
 
+function publishedAt(entry: FeedEntry): number {
+  const timestamp = Date.parse(entry.isoDate ?? entry.pubDate ?? "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 export function buildDigestPrompt(feedTitle: string, entries: FeedEntry[]): string {
-  const included = entries.slice(0, MAX_PROMPT_ENTRIES);
+  // Feeds are not required to be newest-first, so order before capping.
+  const included = [...entries]
+    .sort((left, right) => publishedAt(right) - publishedAt(left))
+    .slice(0, MAX_PROMPT_ENTRIES);
   const lines = included.map((entry, index) => {
     const title = truncate(entry.title ?? "(untitled)", MAX_EXCERPT_CHARS);
     const link = entry.link ?? "";
