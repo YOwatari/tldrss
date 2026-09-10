@@ -302,3 +302,18 @@ describe("worker fetch (explicit default language)", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("worker fetch (guid)", () => {
+  const guidOf = (xml: string) => /<guid[^>]*>([^<]*)<\/guid>/.exec(xml)?.[1];
+
+  it("gives the English and Japanese digests different guids", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi().ai };
+
+    const english = guidOf(await (await callWorker(env)).text());
+    const japanese = guidOf(await (await callWorker(env, `${WORKER_URL}&lang=ja`)).text());
+
+    expect(english).toBeDefined();
+    expect(english).not.toBe(japanese);
+  });
+});

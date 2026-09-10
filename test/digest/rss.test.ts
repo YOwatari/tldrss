@@ -8,6 +8,7 @@ describe("buildRssXml", () => {
       feedUrl: "https://source.example/rss.xml",
       feedTitle: "Example Feed",
       summaryHtml: "Line 1<br />Line 2",
+      language: "en",
       now: new Date("2026-09-10T12:00:00Z"),
     });
 
@@ -16,12 +17,29 @@ describe("buildRssXml", () => {
     expect(xml).toContain("Daily Digest: Example Feed");
   });
 
+  it("gives each language its own guid so readers do not merge the items", () => {
+    const params = {
+      requestUrl: "https://worker.example/",
+      feedUrl: "https://source.example/rss.xml",
+      feedTitle: "Example Feed",
+      summaryHtml: "body",
+      now: new Date("2026-09-10T12:00:00Z"),
+    };
+
+    const guidOf = (xml: string) => /<guid[^>]*>([^<]*)<\/guid>/.exec(xml)?.[1];
+
+    expect(guidOf(buildRssXml({ ...params, language: "en" }))).not.toBe(
+      guidOf(buildRssXml({ ...params, language: "ja" })),
+    );
+  });
+
   it("escapes the html body so the reader receives markup, not tags", () => {
     const xml = buildRssXml({
       requestUrl: "https://worker.example/",
       feedUrl: "https://source.example/rss.xml",
       feedTitle: "Example Feed",
       summaryHtml: '* Something <a href="https://source.example/1">[1]</a>',
+      language: "en",
       now: new Date("2026-09-10T12:00:00Z"),
     });
 

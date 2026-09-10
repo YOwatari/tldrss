@@ -105,6 +105,7 @@ export default {
       feedTitle,
       // Reference markers are numbered against the same list the prompt used.
       summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries)),
+      language,
     });
 
     await env.DIGEST_CACHE.put(key, digestXml, { expirationTtl: 60 * 60 });
