@@ -20,12 +20,21 @@ export function digestPageKey(ref: DigestRef): string {
   return `digest-html:${ref.hash}:${ref.date}:${ref.language}`;
 }
 
+/** Whether a value read back from KV is a record this module wrote. */
+function isDigestPage(value: unknown): value is DigestPage {
+  if (typeof value !== "object" || value === null) return false;
+
+  const record = value as Record<string, unknown>;
+  return typeof record.feedTitle === "string" && typeof record.html === "string";
+}
+
 /**
  * The stored page, or null when there is none.
  *
- * A value that does not parse is treated as absent: it can only come from an
- * older shape of this record, and a 404 is a better answer than a 500 on a
- * page that will be rewritten by the next generation anyway.
+ * A value that does not parse, or that is not this record, is treated as
+ * absent: it can only come from an older shape of this record, and a 404 is a
+ * better answer than a page reading "undefined" — or a 500 — for something the
+ * next generation rewrites anyway.
  */
 export async function getDigestPage(
   cache: KVNamespace,
@@ -34,11 +43,14 @@ export async function getDigestPage(
   const stored = await cache.get(digestPageKey(ref));
   if (stored === null) return null;
 
+  let parsed: unknown;
   try {
-    return JSON.parse(stored) as DigestPage;
+    parsed = JSON.parse(stored);
   } catch {
     return null;
   }
+
+  return isDigestPage(parsed) ? parsed : null;
 }
 
 export async function putDigestPage(

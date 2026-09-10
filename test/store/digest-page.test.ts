@@ -54,4 +54,12 @@ describe("getDigestPage", () => {
 
     await expect(getDigestPage(kv, REF)).resolves.toBeNull();
   });
+
+  it("treats a record of another shape as absent", async () => {
+    for (const stored of ['"just a string"', "null", '{"html":"<p>a</p>"}', "{}"]) {
+      await kv.put(digestPageKey(REF), stored);
+
+      await expect(getDigestPage(kv, REF)).resolves.toBeNull();
+    }
+  });
 });
