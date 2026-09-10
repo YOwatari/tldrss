@@ -4,19 +4,14 @@ import {
   type DigestLanguage,
   isDigestLanguage,
 } from "../digest/language";
-import { renderDigestHtml, renderEntryListHtml } from "../digest/html";
-import { buildDigestXml, buildEmptyChannelXml } from "../digest/build";
-import { noRecentEntriesText } from "../digest/text";
-import type { Digest, DigestLinks } from "../digest/types";
-import { type Env, maxEntriesOf, shouldPostNoUpdates } from "../env";
-import { parseFeed } from "../feed/parse";
-import { type EntrySelection, selectRecentEntries } from "../feed/select";
+import { buildEmptyChannelXml } from "../digest/build";
+import { digestLinksOf, generateDigest } from "../digest/generate";
+import type { DigestLinks } from "../digest/types";
+import type { Env } from "../env";
 import type { Summarizer } from "../llm/summarizer";
 import { sha256Hex } from "../hash";
-import { getDigest, putDigest } from "../store/digest-cache";
-import { putDigestPage } from "../store/digest-page";
+import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
-import { acquireGenerationLock, releaseGenerationLock } from "../store/generation-lock";
 import { jstDate, previousDate } from "../time";
 
 /**
@@ -94,11 +89,11 @@ export async function handleFeed(
   const today = await getDigest(env.DIGEST_CACHE, ref);
   if (today) return xmlResponse(today);
 
-  const links = digestLinksOf(requestUrl, ref);
+  const links = digestLinksOf(requestUrl.origin, ref);
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateDigest(env, summarizer, ref, feedUrl, links));
+  ctx.waitUntil(generateInBackground(env, summarizer, ref, feedUrl, links));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -114,152 +109,24 @@ export async function handleFeed(
 }
 
 /**
- * The addresses that travel to readers. Neither carries the `url` query
- * parameter: it can hold a token for a private feed, while the xml it would
- * end up in is stored in KV and handed to every subscriber. That rules out a
- * `rel="self"` address too; see `channelHead` in `digest/build.ts`.
+ * Generation outside the response, where every failure is logged rather than
+ * surfaced: the reader has already been served yesterday's digest or an empty
+ * channel. Nothing may escape either — this promise is handed to `waitUntil`,
+ * where a rejection would be an unhandled one.
  */
-function digestLinksOf(requestUrl: URL, ref: DigestRef): DigestLinks {
-  return {
-    siteUrl: `${requestUrl.origin}/`,
-    // The language is spelled out even when it is the default one, so the link
-    // keeps pointing at this digest if the default ever changes.
-    pageUrl: `${requestUrl.origin}/digest/${ref.hash}/${ref.date}?lang=${ref.language}`,
-  };
-}
-
-/**
- * The digest body: the model's summary, or the day's entries as bare links
- * when summarizing failed.
- *
- * Only the summary is given up on. Titles and links are already in hand, and
- * a reader whose subscription goes silent on a model outage has no way to tell
- * that from a broken feed. The fallback is then cached like any other digest,
- * so a failure costs the day its summary rather than triggering a retry on
- * every crawl.
- */
-async function summarizeOrList(
-  summarizer: Summarizer,
-  selection: EntrySelection,
-  feedTitle: string,
-  language: DigestLanguage,
-): Promise<string> {
-  try {
-    const summary = await summarizer.summarize({
-      feedTitle,
-      entries: selection.entries,
-      availableCount: selection.availableCount,
-      language,
-    });
-
-    // Reference markers are numbered against the list the prompt used.
-    const html = renderDigestHtml(summary, selection.entries, language);
-    // An answer can be non-blank and still leave nothing behind — markup the
-    // sanitizer drops whole, say. An empty body is worse for a reader than the
-    // entry list, so it is treated as a failure to summarize.
-    if (html.trim() === "") throw new Error("Digest body was empty after rendering");
-
-    return html;
-  } catch (error) {
-    // Unlike the failure logged in `generateDigest`, this one comes from the
-    // model rather than from the feed url, so it carries no credentials and is
-    // logged whole: a timeout and an unusable answer need telling apart.
-    console.error(`Failed to summarize ${selection.entries.length} entries`, error);
-
-    return renderEntryListHtml(selection.entries, language);
-  }
-}
-
-/**
- * Fetches, summarizes and stores one digest. Runs outside the response, so
- * every failure is logged rather than surfaced: the reader has already been
- * served yesterday's digest or an empty channel.
- */
-async function generateDigest(
+async function generateInBackground(
   env: Env,
   summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
   links: DigestLinks,
 ): Promise<void> {
-  // Nothing may escape: this promise is handed to `waitUntil`, where a
-  // rejection would be an unhandled one. KV itself can fail, so acquiring and
-  // releasing the lock are inside the guard too.
   try {
-    const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref);
-    if (!lockToken) return;
-
-    try {
-      const digest = await buildDigest(env, summarizer, ref, feedUrl);
-      await storeDigest(env, digest, links);
-    } finally {
-      await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
-    }
+    await generateDigest({ env, summarizer, ref, feedUrl, links });
   } catch (error) {
     // Private feed URLs carry credentials in the query string, so only the
     // origin and the error class are logged.
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`Failed to build digest for ${feedUrl.origin} (${kind})`);
   }
-}
-
-/**
- * Stores the day's feed, and the page its item links to.
- *
- * A feed with nothing new gets an item-less channel, so Slack posts nothing:
- * one message a day is the point of the digest, and a message saying there is
- * nothing to read is worse than silence. `POST_NO_UPDATES` turns it back on
- * for anyone who would rather see the feed report in every day.
- *
- * The page is written before the xml. Both land in the same KV namespace, so
- * a reader that sees the item already finds the page behind its link.
- */
-async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promise<void> {
-  const ref: DigestRef = {
-    hash: digest.hash,
-    date: digest.date,
-    language: digest.language,
-  };
-
-  if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
-    await putDigest(
-      env.DIGEST_CACHE,
-      ref,
-      buildEmptyChannelXml({
-        feedTitle: digest.feedTitle,
-        language: digest.language,
-        links,
-      }),
-    );
-    return;
-  }
-
-  await putDigestPage(env.DIGEST_CACHE, ref, {
-    feedTitle: digest.feedTitle,
-    html: digest.html,
-  });
-  await putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links }));
-}
-
-async function buildDigest(
-  env: Env,
-  summarizer: Summarizer,
-  ref: DigestRef,
-  feedUrl: URL,
-): Promise<Digest> {
-  const feedResponse = await fetch(feedUrl.toString());
-  if (!feedResponse.ok) {
-    throw new Error(`Feed responded with ${feedResponse.status}`);
-  }
-
-  const feed = parseFeed(await feedResponse.text());
-  const feedTitle = feed.title ?? feedUrl.host;
-  const selection = selectRecentEntries(feed.items, { maxEntries: maxEntriesOf(env) });
-
-  const html =
-    selection.entries.length === 0
-      ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
-      : await summarizeOrList(summarizer, selection, feedTitle, ref.language);
-
-  return { ...ref, feedTitle, html, entries: selection.entries };
 }
