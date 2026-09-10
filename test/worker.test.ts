@@ -133,6 +133,20 @@ describe("routing", () => {
     await expect(storedDigest()).resolves.not.toBeNull();
   });
 
+  it("returns 404, not 405, for an unknown path with an unserved method", async () => {
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/does-not-exist", { method: "POST" }),
+      { ...bindings, AI: stubAi().ai },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    // 405 claims the resource exists but rejects the method.
+    expect(response.status).toBe(404);
+  });
+
   it("returns 404 for any other path", async () => {
     const response = await callWorker(
       { ...bindings, AI: stubAi().ai },
