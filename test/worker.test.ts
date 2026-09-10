@@ -450,6 +450,21 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
+  it("falls back when nothing of the model's answer survives sanitizing", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Non-blank, so the summarizer accepts it, yet it renders as nothing.
+    const { ai } = stubAi("<script>alert(1)</script>");
+
+    await callWorker({ ...bindings, AI: ai });
+
+    const stored = await storedDigest();
+    expect(stored?.value).toContain("A summary could not be generated");
+    expect(stored?.value).toContain("Entry 1");
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it("stores nothing when the feed itself cannot be read", async () => {
     stubFeedFetch(() => new Response("nope", { status: 500 }));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});

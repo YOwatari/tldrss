@@ -133,7 +133,13 @@ async function summarizeOrList(
     });
 
     // Reference markers are numbered against the list the prompt used.
-    return renderDigestHtml(summary, selection.entries, language);
+    const html = renderDigestHtml(summary, selection.entries, language);
+    // An answer can be non-blank and still leave nothing behind — markup the
+    // sanitizer drops whole, say. An empty body is worse for a reader than the
+    // entry list, so it is treated as a failure to summarize.
+    if (html.trim() === "") throw new Error("Digest body was empty after rendering");
+
+    return html;
   } catch (error) {
     // Unlike the failure logged in `generateDigest`, this one comes from the
     // model rather than from the feed url, so it carries no credentials and is
