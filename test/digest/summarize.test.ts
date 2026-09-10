@@ -5,6 +5,7 @@ import {
   MAX_EXCERPT_CHARS,
   MAX_PROMPT_ENTRIES,
   buildDigestPrompt,
+  selectPromptEntries,
   summarizeEntries,
 } from "../../src/digest/summarize";
 
@@ -154,5 +155,35 @@ describe("digest brevity", () => {
     const prompt = buildDigestPrompt("Example Feed", entries);
 
     expect(prompt).toContain(`${MAX_BULLET_CHARS}`);
+  });
+});
+
+describe("selectPromptEntries", () => {
+  it("returns the newest entries in the order the prompt numbers them", () => {
+    const oldestFirst = Array.from({ length: MAX_PROMPT_ENTRIES + 2 }, (_, index) => ({
+      title: `Entry ${index + 1}`,
+      link: `https://example.com/${index + 1}`,
+      isoDate: new Date(Date.UTC(2026, 8, 1, index)).toISOString(),
+    }));
+
+    const selected = selectPromptEntries(oldestFirst);
+    const prompt = buildDigestPrompt("Example Feed", oldestFirst);
+
+    expect(selected).toHaveLength(MAX_PROMPT_ENTRIES);
+    // The numbering in the prompt has to match the position in this list, or
+    // the reference links would point at the wrong article.
+    selected.forEach((entry, index) => {
+      expect(prompt).toContain(`${index + 1}. ${entry.title}`);
+    });
+  });
+});
+
+describe("reference markers", () => {
+  it("asks the model to cite entry numbers in English", () => {
+    expect(buildDigestPrompt("Example Feed", entries)).toContain("square brackets");
+  });
+
+  it("asks the model to cite entry numbers in Japanese", () => {
+    expect(buildDigestPrompt("Example Feed", entries, "ja")).toContain("角かっこ");
   });
 });

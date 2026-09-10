@@ -36,8 +36,12 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     intro: (feedTitle) =>
       `Create a concise daily digest of the following RSS entries from "${feedTitle}".`,
     rules: [
-      "Keep it brief (4-8 bullet points), factual, and easy to scan.",
-      `Keep each bullet under ${MAX_BULLET_CHARS} characters.`,
+      "Pick the 4-8 most notable entries and write one bullet for each. Never " +
+        "cover the same entry twice.",
+      "Write one line per bullet: the entry number in square brackets, then the " +
+        'summary, e.g. "[3] Support for ARM64 landed." Use only the numbers ' +
+        "listed below, and do not repeat the entry title.",
+      `Keep each bullet under ${MAX_BULLET_CHARS} characters, factual and easy to scan.`,
     ],
     note: (included, total) => `Summarizing the ${included} of ${total} most recent entries.`,
   },
@@ -47,8 +51,12 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
       "前置きや後書きを付けず、ダイジェスト本文だけを日本語で出力してください。",
     intro: (feedTitle) => `次の「${feedTitle}」の RSS エントリから、日次ダイジェストを作成してください。`,
     rules: [
-      "4〜8 個の箇条書きで、事実に忠実に、ひと目で読める分量にまとめてください。",
-      `各項目は ${MAX_BULLET_CHARS} 字以内に収めてください。`,
+      "重要なエントリを 4〜8 件選び、1 件につき 1 項目を書いてください。" +
+        "同じエントリを二度扱わないでください。",
+      "各項目は 1 行で、エントリ番号を角かっこで囲んだあとに要約を続けてください。" +
+        "例:「[3] ARM64 に対応した。」。番号は下のリストのものだけを使い、" +
+        "エントリの見出しをそのまま繰り返さないでください。",
+      `各項目は ${MAX_BULLET_CHARS} 字以内で、事実に忠実に、ひと目で読める分量にしてください。`,
       "エントリの原文が英語であっても、ダイジェストは日本語で書いてください。",
     ],
     note: (included, total) =>
@@ -67,6 +75,17 @@ function publishedAt(entry: FeedEntry): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+/**
+ * The entries the prompt will number, newest first. Reference links resolve a
+ * marker by position in this list, so both sides have to derive it the same way.
+ */
+export function selectPromptEntries(entries: FeedEntry[]): FeedEntry[] {
+  // Feeds are not required to be newest-first, so order before capping.
+  return [...entries]
+    .sort((left, right) => publishedAt(right) - publishedAt(left))
+    .slice(0, MAX_PROMPT_ENTRIES);
+}
+
 export function buildDigestPrompt(
   rawFeedTitle: string,
   entries: FeedEntry[],
@@ -75,10 +94,7 @@ export function buildDigestPrompt(
   const copy = COPY[language];
   // Every field below is feed-controlled, so all of them are bounded.
   const feedTitle = truncate(rawFeedTitle, MAX_EXCERPT_CHARS);
-  // Feeds are not required to be newest-first, so order before capping.
-  const included = [...entries]
-    .sort((left, right) => publishedAt(right) - publishedAt(left))
-    .slice(0, MAX_PROMPT_ENTRIES);
+  const included = selectPromptEntries(entries);
   const lines = included.map((entry, index) => {
     const title = truncate(entry.title ?? "(untitled)", MAX_EXCERPT_CHARS);
     const link = truncate(entry.link ?? "", MAX_EXCERPT_CHARS);

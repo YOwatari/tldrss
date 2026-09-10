@@ -1,7 +1,9 @@
+import { renderDigestHtml } from "./digest/references";
 import { buildRssXml } from "./digest/rss";
 import {
   DEFAULT_LANGUAGE,
   type DigestLanguage,
+  selectPromptEntries,
   summarizeEntries,
 } from "./digest/summarize";
 import { filterEntriesFromLast24Hours } from "./feed/filter";
@@ -100,7 +102,8 @@ export default {
       requestUrl: request.url,
       feedUrl: parsedFeedUrl.toString(),
       feedTitle,
-      summary,
+      // Reference markers are numbered against the same list the prompt used.
+      summaryHtml: renderDigestHtml(summary, selectPromptEntries(recentEntries)),
     });
 
     await env.DIGEST_CACHE.put(key, digestXml, { expirationTtl: 60 * 60 });

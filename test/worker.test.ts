@@ -232,3 +232,26 @@ describe("worker fetch (language)", () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("worker fetch (article links)", () => {
+  it("heads each bullet with a link to the article it summarizes", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[1] It shipped.").ai })
+    ).text();
+
+    expect(body).toContain(`&lt;a href=&quot;${FEED_ORIGIN}/1&quot;&gt;Entry 1&lt;/a&gt;`);
+    expect(body).toContain("It shipped.");
+  });
+
+  it("drops a bullet citing an entry that does not exist", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("[7] It shipped.").ai })
+    ).text();
+
+    expect(body).not.toContain("It shipped.");
+  });
+});
