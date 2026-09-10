@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { decode as decodeHtmlEntities } from "html-entities";
 
 /**
  * Feed entry contract shared by the rest of the worker.
@@ -106,12 +107,16 @@ function textOf(nodes: OrderedNode[]): string {
   let text = "";
 
   for (const node of nodes) {
-    if (tagName(node) === TEXT_KEY) {
+    const tag = tagName(node);
+    if (tag === TEXT_KEY) {
       const value = node[TEXT_KEY];
       if (typeof value === "string") text += value;
       continue;
     }
-    text += textOf(childrenOf(node));
+    // Block elements separate words (`<p>First</p><p>Second</p>`); inline
+    // elements are concatenated directly (`Git<b>Hub</b>!`).
+    const nested = textOf(childrenOf(node));
+    text += isBlockTag(tag) ? ` ${nested} ` : nested;
   }
 
   return text;
@@ -158,14 +163,28 @@ function extractLink(nodes: OrderedNode[], preferredPrefix = ""): string | undef
  * Block-level tags become a space (they separate words); inline tags are removed
  * outright, so `<p>Git<b>Hub</b>!</p>` stays "GitHub!".
  */
-const BLOCK_TAG =
-  /<\/?(?:address|article|aside|blockquote|br|dd|div|dl|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^<>]*>/gi;
+const BLOCK_TAG_NAMES = [
+  "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt",
+  "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+  "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody", "td",
+  "tfoot", "th", "thead", "tr", "ul",
+];
+
+const BLOCK_TAGS = new Set(BLOCK_TAG_NAMES);
+const BLOCK_TAG = new RegExp(`</?(?:${BLOCK_TAG_NAMES.join("|")})\\b[^<>]*>`, "gi");
 const INLINE_TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
 
+function isBlockTag(tag: string): boolean {
+  return BLOCK_TAGS.has(localName(tag).toLowerCase());
+}
+
+/**
+ * Entities inside CDATA are not decoded by the XML parser, so a description
+ * like `<![CDATA[AT&amp;T]]>` still carries entity syntax at this point.
+ */
 function stripHtml(html: string): string {
-  return normalizeText(
-    html.replaceAll(BLOCK_TAG, " ").replaceAll(INLINE_TAG, "").replaceAll(/&nbsp;/g, " "),
-  );
+  const withoutMarkup = html.replaceAll(BLOCK_TAG, " ").replaceAll(INLINE_TAG, "");
+  return normalizeText(decodeHtmlEntities(withoutMarkup));
 }
 
 function toIsoDate(dateText: string | undefined): string | undefined {

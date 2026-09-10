@@ -259,6 +259,41 @@ describe("parseFeed (html in descriptions)", () => {
   });
 });
 
+const ATOM_XHTML_BLOCKS = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Blocks</title>
+  <entry>
+    <title>Entry</title>
+    <link rel="alternate" href="https://example.org/blocks"/>
+    <updated>2026-09-10T02:00:00Z</updated>
+    <summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>First</p><p>Second</p></div></summary>
+  </entry>
+</feed>`;
+
+const RSS_CDATA_ENTITIES = `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Entities</title><item>
+  <title>Entry</title>
+  <link>https://example.com/1</link>
+  <pubDate>Wed, 09 Sep 2026 10:00:00 GMT</pubDate>
+  <description><![CDATA[AT&amp;T &#8217; news &mdash; today]]></description>
+</item></channel></rss>`;
+
+describe("parseFeed (xhtml block elements)", () => {
+  it("keeps a separator between adjacent block elements", () => {
+    const [entry] = parseFeed(ATOM_XHTML_BLOCKS).items;
+
+    expect(entry.contentSnippet).toBe("First Second");
+  });
+});
+
+describe("parseFeed (entities inside CDATA)", () => {
+  it("decodes named and numeric html entities", () => {
+    const [entry] = parseFeed(RSS_CDATA_ENTITIES).items;
+
+    expect(entry.contentSnippet).toBe("AT&T \u2019 news — today");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");
