@@ -74,6 +74,44 @@ describe("releaseGenerationLock", () => {
     await expect(acquire()).resolves.toEqual(expect.any(String));
   });
 
+  it("holds the in-isolate guard until the KV entry is gone", async () => {
+    const token = await acquire();
+    let releaseDelete: () => void = () => {};
+    let reads = 0;
+    const slowCache = {
+      // The ownership check sees the token; a later reader sees the key gone,
+      // as it would once KV has converged.
+      get: async () => (reads++ === 0 ? token : null),
+      put: async () => {},
+      delete: () => new Promise<void>((resolve) => (releaseDelete = resolve)),
+    } as unknown as KVNamespace;
+
+    const releasing = releaseGenerationLock(slowCache, REF, token ?? "");
+    await Promise.resolve();
+
+    // The release is still running, so no one in this isolate may start a
+    // generation the pending delete would then unlock.
+    await expect(acquireGenerationLock(slowCache, REF)).resolves.toBeNull();
+    releaseDelete();
+    await releasing;
+  });
+
+  it("clears the guard even when KV fails, so the feed is not stuck", async () => {
+    await acquire();
+    const failingCache = {
+      get: async () => {
+        throw new Error("KV unavailable");
+      },
+    } as unknown as KVNamespace;
+
+    await expect(releaseGenerationLock(failingCache, REF, "any")).rejects.toThrow();
+
+    // Read against a cache that reports the key as free: what must not linger
+    // is the in-isolate guard.
+    const freeCache = { get: async () => null, put: async () => {} } as unknown as KVNamespace;
+    await expect(acquireGenerationLock(freeCache, REF)).resolves.toEqual(expect.any(String));
+  });
+
   it("leaves a lock held by another isolate in place", async () => {
     await acquire();
 

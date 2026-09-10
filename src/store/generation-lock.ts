@@ -53,6 +53,11 @@ export async function acquireGenerationLock(
  * Releases the lock only when `token` still owns it. Two isolates can end up
  * holding the same key while KV converges; without the check, the first to
  * finish would unlock a generation that is still running elsewhere.
+ *
+ * The in-isolate guard is held until KV is done, so a request arriving mid
+ * release cannot take a lock that the pending delete would then drop. It is
+ * cleared even when KV fails, otherwise one failure would block the feed for
+ * the lifetime of the isolate.
  */
 export async function releaseGenerationLock(
   cache: KVNamespace,
@@ -60,8 +65,11 @@ export async function releaseGenerationLock(
   token: string,
 ): Promise<void> {
   const key = generationLockKey(ref);
-  inFlight.delete(key);
 
-  if ((await cache.get(key)) !== token) return;
-  await cache.delete(key);
+  try {
+    if ((await cache.get(key)) !== token) return;
+    await cache.delete(key);
+  } finally {
+    inFlight.delete(key);
+  }
 }
