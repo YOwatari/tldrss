@@ -137,6 +137,30 @@ describe("parseFeed (Atom xhtml text constructs)", () => {
   });
 });
 
+const ATOM_WITH_EXTENSIONS = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Extension Feed</title>
+  <entry>
+    <media:title>Media title</media:title>
+    <title>Standard title</title>
+    <media:content url="https://example.org/video.mp4"/>
+    <content>Standard content</content>
+    <media:link href="https://example.org/media-link"/>
+    <link rel="alternate" href="https://example.org/standard-link"/>
+    <updated>2026-09-10T02:00:00Z</updated>
+  </entry>
+</feed>`;
+
+describe("parseFeed (namespaced extensions)", () => {
+  it("prefers standard elements over same-local-name extensions", () => {
+    const [entry] = parseFeed(ATOM_WITH_EXTENSIONS).items;
+
+    expect(entry.title).toBe("Standard title");
+    expect(entry.content).toBe("Standard content");
+    expect(entry.link).toBe("https://example.org/standard-link");
+  });
+});
+
 describe("parseFeed (malformed input)", () => {
   it("returns an empty feed when the document is not a feed", () => {
     const feed = parseFeed("<html><body>not a feed</body></html>");

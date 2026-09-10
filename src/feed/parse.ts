@@ -65,20 +65,20 @@ function attributesOf(node: OrderedNode): Record<string, string> {
 }
 
 /**
- * Matches on the full tag name first so prefixed RSS extensions such as
- * `content:encoded` keep working, then falls back to the local name.
+ * Exact tag names win across the whole list before local names are considered,
+ * so `<content>` beats a `<media:content>` extension that happens to share its
+ * local name, while prefixed documents (`<atom:entry>`) and prefixed RSS
+ * extensions (`content:encoded`) both still resolve.
  */
-function matches(node: OrderedNode, name: string): boolean {
-  const tag = tagName(node);
-  return tag === name || localName(tag) === name;
-}
-
 function findAll(nodes: OrderedNode[], name: string): OrderedNode[] {
-  return nodes.filter((node) => matches(node, name));
+  const exact = nodes.filter((node) => tagName(node) === name);
+  if (exact.length > 0) return exact;
+
+  return nodes.filter((node) => localName(tagName(node)) === name);
 }
 
 function find(nodes: OrderedNode[], name: string): OrderedNode | undefined {
-  return nodes.find((node) => matches(node, name));
+  return findAll(nodes, name)[0];
 }
 
 /** Concatenates the text of a child list, descending into nested markup. */
