@@ -166,6 +166,24 @@ describe("worker fetch", () => {
     expect(response.status).toBe(502);
   });
 
+  it("does not log credentials carried in the feed url", async () => {
+    const secretUrl = "https://source.example/rss.xml?token=super-secret";
+    stubFeedFetch(() => new Response("<rss><channel>"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await callWorker(
+      { ...bindings, AI: stubAi().ai },
+      `https://worker.example/?url=${encodeURIComponent(secretUrl)}`,
+    );
+
+    expect(response.status).toBe(502);
+    const logged = errors.mock.calls.flat().map(String).join(" ");
+    expect(logged).not.toContain("super-secret");
+    expect(logged).not.toContain("token=");
+    expect(logged).toContain("https://source.example");
+    errors.mockRestore();
+  });
+
   it("returns 502 when the upstream feed fails", async () => {
     stubFeedFetch(() => new Response("boom", { status: 500 }));
 

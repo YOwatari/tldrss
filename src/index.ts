@@ -51,7 +51,10 @@ export default {
       }
       feed = parseFeed(await feedResponse.text());
     } catch (error) {
-      console.error("Failed to read feed", parsedFeedUrl.toString(), error);
+      // Private feed URLs carry credentials in the query string, so only the
+      // origin and the error class are logged.
+      const kind = error instanceof Error ? error.name : typeof error;
+      console.error(`Failed to read feed from ${parsedFeedUrl.origin} (${kind})`);
       return new Response("Failed to read feed", { status: 502 });
     }
 
