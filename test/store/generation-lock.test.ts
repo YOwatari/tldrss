@@ -11,6 +11,10 @@ const kv = (providedEnv as unknown as { DIGEST_CACHE: KVNamespace }).DIGEST_CACH
 const REF = { hash: "b".repeat(64), date: "2026-09-10", language: "ja" } as const;
 
 afterEach(async () => {
+  // The lock also tracks in-flight generations in module state, so both
+  // variants of REF are released explicitly rather than only dropping KV.
+  await releaseGenerationLock(kv, REF);
+  await releaseGenerationLock(kv, { ...REF, language: "en" });
   await reset();
 });
 
