@@ -1,41 +1,19 @@
-import { buildDigestPrompt, buildRssXml } from "./digest/rss";
+import { buildRssXml } from "./digest/rss";
+import { summarizeEntries } from "./digest/summarize";
 import { filterEntriesFromLast24Hours } from "./feed/filter";
 import { parseFeed } from "./feed/parse";
 
 export type Env = {
   DIGEST_CACHE: KVNamespace;
-  GEMINI_API_KEY: string;
-  GEMINI_MODEL?: string;
+  AI: Ai;
+  /** Workers AI model id; falls back to DEFAULT_AI_MODEL when unset. */
+  AI_MODEL?: string;
 };
 
 const XML_HEADERS = { "content-type": "application/rss+xml; charset=utf-8" };
 
 function cacheKey(feedUrl: string, now = new Date()): string {
   return `digest:${now.toISOString().slice(0, 10)}:${feedUrl}`;
-}
-
-async function summarizeWithGemini(prompt: string, env: Env): Promise<string> {
-  const model = env.GEMINI_MODEL ?? "gemini-2.5-flash";
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Gemini request failed: ${response.status}`);
-  }
-
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No summary generated.";
 }
 
 export default {
@@ -72,15 +50,21 @@ export default {
     const feed = parseFeed(xml);
     const recentEntries = filterEntriesFromLast24Hours(feed.items);
 
+    const feedTitle = feed.title ?? parsedFeedUrl.host;
     const summary =
       recentEntries.length === 0
         ? "No new entries were published in the last 24 hours."
-        : await summarizeWithGemini(buildDigestPrompt(feed.title ?? parsedFeedUrl.host, recentEntries), env);
+        : await summarizeEntries({
+            ai: env.AI,
+            model: env.AI_MODEL,
+            feedTitle,
+            entries: recentEntries,
+          });
 
     const digestXml = buildRssXml({
       requestUrl: request.url,
       feedUrl: parsedFeedUrl.toString(),
-      feedTitle: feed.title ?? parsedFeedUrl.host,
+      feedTitle,
       summary,
     });
 

@@ -7,9 +7,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 
-// `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; this worker's
-// bindings come from wrangler.toml plus the test-only GEMINI_API_KEY binding.
-const env = providedEnv as unknown as Env;
+// `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
+// wrangler.toml, while Workers AI is stubbed per test (it would call out to the
+// Cloudflare API otherwise).
+const bindings = providedEnv as unknown as Omit<Env, "AI">;
 
 const FEED_ORIGIN = "https://source.example";
 const FEED_URL = `${FEED_ORIGIN}/rss.xml`;
@@ -23,24 +24,14 @@ function atomWithEntry(updated: string): string {
   return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Atom Feed</title><entry><title>Atom Entry</title><link rel="alternate" href="${FEED_ORIGIN}/atom-1"/><updated>${updated}</updated><summary>Atom summary</summary></entry></feed>`;
 }
 
-function geminiResponse(text: string): Response {
-  return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-/** Routes outbound requests by origin so tests never touch the network. */
-function stubOutbound(routes: { feed?: () => Response; gemini?: () => Response }) {
+/** Stubs the feed origin so tests never touch the network. */
+function stubFeedFetch(respond: () => Response) {
   const calls: string[] = [];
   const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     calls.push(url);
 
-    if (url.startsWith(FEED_ORIGIN) && routes.feed) return routes.feed();
-    if (url.startsWith("https://generativelanguage.googleapis.com/") && routes.gemini) {
-      return routes.gemini();
-    }
+    if (url.startsWith(FEED_ORIGIN)) return respond();
     throw new Error(`Unexpected outbound request: ${url}`);
   });
 
@@ -48,7 +39,12 @@ function stubOutbound(routes: { feed?: () => Response; gemini?: () => Response }
   return calls;
 }
 
-async function callWorker(url = WORKER_URL): Promise<Response> {
+function stubAi(response = "- summary") {
+  const run = vi.fn().mockResolvedValue({ response });
+  return { ai: { run } as unknown as Ai, run };
+}
+
+async function callWorker(env: Env, url = WORKER_URL): Promise<Response> {
   const ctx = createExecutionContext();
   const response = await worker.fetch(new Request(url), env, ctx);
   await waitOnExecutionContext(ctx);
@@ -65,24 +61,28 @@ afterEach(async () => {
 
 describe("worker fetch", () => {
   it("returns 400 when the url parameter is missing", async () => {
-    const response = await callWorker("https://worker.example/");
+    const response = await callWorker(
+      { ...bindings, AI: stubAi().ai },
+      "https://worker.example/",
+    );
 
     expect(response.status).toBe(400);
   });
 
   it("returns 400 for a non-http url", async () => {
-    const response = await callWorker("https://worker.example/?url=ftp://source.example/rss.xml");
+    const response = await callWorker(
+      { ...bindings, AI: stubAi().ai },
+      "https://worker.example/?url=ftp://source.example/rss.xml",
+    );
 
     expect(response.status).toBe(400);
   });
 
-  it("summarizes an RSS 2.0 feed and stores the digest in KV", async () => {
-    const calls = stubOutbound({
-      feed: () => new Response(rssWithEntry(hourAgo().toUTCString()), { status: 200 }),
-      gemini: () => geminiResponse("- summary"),
-    });
+  it("summarizes an RSS 2.0 feed with Workers AI and stores the digest in KV", async () => {
+    const calls = stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi("- summary");
 
-    const response = await callWorker();
+    const response = await callWorker({ ...bindings, AI: ai });
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -90,55 +90,63 @@ describe("worker fetch", () => {
     expect(body).toContain("<rss version=\"2.0\">");
     expect(body).toContain("- summary");
     expect(body).toContain("Daily Digest: Test Feed");
-    expect(calls).toHaveLength(2);
+    expect(calls).toEqual([FEED_URL]);
+    expect(run).toHaveBeenCalledTimes(1);
 
-    const cached = await env.DIGEST_CACHE.get(
+    const cached = await bindings.DIGEST_CACHE.get(
       `digest:${new Date().toISOString().slice(0, 10)}:${FEED_URL}`,
     );
     expect(cached).toBe(body);
   });
 
-  it("summarizes an Atom feed", async () => {
-    stubOutbound({
-      feed: () => new Response(atomWithEntry(hourAgo().toISOString()), { status: 200 }),
-      gemini: () => geminiResponse("- atom summary"),
-    });
+  it("passes the configured model to Workers AI", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
 
-    const body = await (await callWorker()).text();
+    await callWorker({ ...bindings, AI: ai, AI_MODEL: "@cf/meta/llama-3.2-3b-instruct" });
+
+    expect(run.mock.calls[0][0]).toBe("@cf/meta/llama-3.2-3b-instruct");
+  });
+
+  it("summarizes an Atom feed", async () => {
+    stubFeedFetch(() => new Response(atomWithEntry(hourAgo().toISOString())));
+
+    const body = await (
+      await callWorker({ ...bindings, AI: stubAi("- atom summary").ai })
+    ).text();
 
     expect(body).toContain("- atom summary");
     expect(body).toContain("Daily Digest: Atom Feed");
   });
 
-  it("serves the cached digest without hitting the network again", async () => {
-    const calls = stubOutbound({
-      feed: () => new Response(rssWithEntry(hourAgo().toUTCString()), { status: 200 }),
-      gemini: () => geminiResponse("- summary"),
-    });
+  it("serves the cached digest without hitting the feed or the model again", async () => {
+    const calls = stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai };
 
-    const first = await (await callWorker()).text();
-    const second = await (await callWorker()).text();
+    const first = await (await callWorker(env)).text();
+    const second = await (await callWorker(env)).text();
 
     expect(second).toBe(first);
-    expect(calls).toHaveLength(2);
+    expect(calls).toEqual([FEED_URL]);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the LLM call when nothing was published in the last 24 hours", async () => {
+  it("skips the model call when nothing was published in the last 24 hours", async () => {
     const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
-    const calls = stubOutbound({
-      feed: () => new Response(rssWithEntry(stale), { status: 200 }),
-    });
+    stubFeedFetch(() => new Response(rssWithEntry(stale)));
+    const { ai, run } = stubAi();
 
-    const body = await (await callWorker()).text();
+    const body = await (await callWorker({ ...bindings, AI: ai })).text();
 
     expect(body).toContain("No new entries were published in the last 24 hours.");
-    expect(calls).toEqual([FEED_URL]);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("returns 502 when the upstream feed fails", async () => {
-    stubOutbound({ feed: () => new Response("boom", { status: 500 }) });
+    stubFeedFetch(() => new Response("boom", { status: 500 }));
 
-    const response = await callWorker();
+    const response = await callWorker({ ...bindings, AI: stubAi().ai });
 
     expect(response.status).toBe(502);
   });

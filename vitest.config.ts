@@ -5,10 +5,8 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
-      miniflare: {
-        // GEMINI_API_KEY is a secret, so it is not in wrangler.toml.
-        bindings: { GEMINI_API_KEY: "test-key" },
-      },
+      // The AI binding is remote-only; tests stub it, so no API token is needed.
+      remoteBindings: false,
     }),
   ],
 });

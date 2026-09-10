@@ -1,21 +1,3 @@
-import type { FeedEntry } from "../feed/parse";
-
-export function buildDigestPrompt(feedTitle: string, entries: FeedEntry[]): string {
-  const lines = entries.map((entry, index) => {
-    const title = entry.title ?? "(untitled)";
-    const link = entry.link ?? "";
-    const snippet = entry.contentSnippet ?? entry.content ?? "";
-    return `${index + 1}. ${title}\nURL: ${link}\nExcerpt: ${snippet}`;
-  });
-
-  return [
-    `Create a concise daily digest of the following RSS entries from \"${feedTitle}\".`,
-    "Keep it brief (4-8 bullet points), factual, and easy to scan.",
-    "",
-    ...lines,
-  ].join("\n");
-}
-
 function escapeXml(text: string): string {
   return text
     .replaceAll("&", "&amp;")

@@ -6,5 +6,8 @@ compatibility_date = "2026-08-22"
 binding = "DIGEST_CACHE"
 id = "placeholder"
 
+[ai]
+binding = "AI"
+
 [vars]
-GEMINI_MODEL = "gemini-2.5-flash"
+AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
