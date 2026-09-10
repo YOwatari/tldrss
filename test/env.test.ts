@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ENTRIES_CEILING, maxEntriesOf } from "../src/env";
+import { MAX_ENTRIES_CEILING, maxEntriesOf, shouldPostNoUpdates } from "../src/env";
 import { DEFAULT_MAX_ENTRIES } from "../src/feed/select";
 
 function envWith(maxEntries: unknown) {
@@ -28,5 +28,28 @@ describe("maxEntriesOf", () => {
 
   it("clamps a cap above the ceiling", () => {
     expect(maxEntriesOf(envWith(`${MAX_ENTRIES_CEILING + 50}`))).toBe(MAX_ENTRIES_CEILING);
+  });
+});
+
+describe("shouldPostNoUpdates", () => {
+  const envWithFlag = (value: unknown) => ({ POST_NO_UPDATES: value }) as never;
+
+  it("stays silent on a quiet day by default", () => {
+    expect(shouldPostNoUpdates({} as never)).toBe(false);
+  });
+
+  it("posts a digest saying so when the var is turned on", () => {
+    expect(shouldPostNoUpdates(envWithFlag("true"))).toBe(true);
+  });
+
+  it("accepts the spellings wrangler and a boolean literal produce", () => {
+    expect(shouldPostNoUpdates(envWithFlag("1"))).toBe(true);
+    expect(shouldPostNoUpdates(envWithFlag(true))).toBe(true);
+  });
+
+  it("treats anything else as off, rather than as a syntax error", () => {
+    for (const value of ["false", "0", "", "yes please", undefined]) {
+      expect(shouldPostNoUpdates(envWithFlag(value))).toBe(false);
+    }
   });
 });
