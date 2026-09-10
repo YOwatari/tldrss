@@ -26,13 +26,19 @@ function escapeHtml(text: string): string {
 function resolveBullets(
   summary: string,
   entries: FeedEntry[],
-): { byEntry: Map<number, string>; sawBullet: boolean } {
+): { lead: string[]; byEntry: Map<number, string>; sawBullet: boolean } {
   const byEntry = new Map<number, string>();
+  const lead: string[] = [];
   let sawBullet = false;
 
   for (const line of summary.split("\n")) {
     const match = BULLET_PATTERN.exec(line);
-    if (!match) continue;
+    if (!match) {
+      // Prose introducing the digest; anything after the bullets is the
+      // model padding its answer and is dropped.
+      if (!sawBullet && line.trim() !== "") lead.push(line.trim());
+      continue;
+    }
     sawBullet = true;
 
     const index = Number(match[1]) - 1;
@@ -42,7 +48,7 @@ function resolveBullets(
     byEntry.set(index, match[2].trim());
   }
 
-  return { byEntry, sawBullet };
+  return { lead, byEntry, sawBullet };
 }
 
 function renderItem(entry: FeedEntry, summary: string): string {
@@ -54,11 +60,12 @@ function renderItem(entry: FeedEntry, summary: string): string {
 }
 
 /**
- * Renders the digest body as an HTML fragment: one linked article per bullet,
- * built from the feed rather than from the model's own formatting.
+ * Renders the digest body as an HTML fragment: an optional lead paragraph
+ * followed by one linked article per bullet, built from the feed rather than
+ * from the model's own formatting.
  */
 export function renderDigestHtml(summary: string, entries: FeedEntry[]): string {
-  const { byEntry, sawBullet } = resolveBullets(summary, entries);
+  const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
 
   // The model ignored the format, or there was nothing to summarize at all.
   if (!sawBullet) {
@@ -76,5 +83,10 @@ export function renderDigestHtml(summary: string, entries: FeedEntry[]): string 
     .filter((item) => item !== null);
 
   // Every bullet cited an entry that does not exist; nothing can be shown.
-  return items.length === 0 ? "" : `<ul>\n${items.join("\n")}\n</ul>`;
+  if (items.length === 0) return "";
+
+  const paragraph =
+    lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;
+
+  return `${paragraph}<ul>\n${items.join("\n")}\n</ul>`;
 }

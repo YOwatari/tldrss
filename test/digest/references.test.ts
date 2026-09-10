@@ -68,3 +68,37 @@ describe("renderDigestHtml", () => {
     );
   });
 });
+
+describe("renderDigestHtml (lead)", () => {
+  it("puts the text before the bullets into a lead paragraph", () => {
+    const html = renderDigestHtml("Security was the theme today.\n[1] It shipped.", entries);
+
+    expect(html).toBe(
+      "<p>Security was the theme today.</p>\n" +
+        '<ul>\n  <li><a href="https://example.com/1">First article</a><br />It shipped.</li>\n</ul>',
+    );
+  });
+
+  it("joins a multi-line lead", () => {
+    const html = renderDigestHtml("First sentence.\nSecond sentence.\n[1] It shipped.", entries);
+
+    expect(html).toContain("<p>First sentence.<br />Second sentence.</p>");
+  });
+
+  it("omits the paragraph when the model wrote no lead", () => {
+    expect(renderDigestHtml("[1] It shipped.", entries)).not.toContain("<p>");
+  });
+
+  it("ignores anything the model added after the bullets", () => {
+    const html = renderDigestHtml("[1] It shipped.\nThat is all for today.", entries);
+
+    expect(html).not.toContain("That is all for today.");
+  });
+
+  it("escapes html in the lead", () => {
+    const html = renderDigestHtml("<script>x</script>\n[1] It shipped.", entries);
+
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("<p>&lt;script&gt;x&lt;/script&gt;</p>");
+  });
+});

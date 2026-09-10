@@ -36,11 +36,16 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     intro: (feedTitle) =>
       `Create a concise daily digest of the following RSS entries from "${feedTitle}".`,
     rules: [
-      "Pick the 4-8 most notable entries and write one bullet for each. Never " +
-        "cover the same entry twice.",
+      "Open with a 2-3 sentence lead saying what the day was about, on its own " +
+        "line and without any number.",
+      "Then pick the 4-8 most notable entries and write one bullet for each. " +
+        "Never cover the same entry twice.",
       "Write one line per bullet: the entry number in square brackets, then the " +
-        'summary, e.g. "[3] Support for ARM64 landed." Use only the numbers ' +
-        "listed below, and do not repeat the entry title.",
+        'summary, e.g. "[3] Adds a Rust query and covers Kotlin frameworks." ' +
+        "Use only the numbers listed below.",
+      "The reader already sees each title, so a bullet must add what the title " +
+        "leaves out — numbers, scope, or conditions taken from the excerpt. " +
+        "Never restate the title.",
       `Keep each bullet under ${MAX_BULLET_CHARS} characters, factual and easy to scan.`,
     ],
     note: (included, total) => `Summarizing the ${included} of ${total} most recent entries.`,
@@ -51,11 +56,16 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
       "前置きや後書きを付けず、ダイジェスト本文だけを日本語で出力してください。",
     intro: (feedTitle) => `次の「${feedTitle}」の RSS エントリから、日次ダイジェストを作成してください。`,
     rules: [
-      "重要なエントリを 4〜8 件選び、1 件につき 1 項目を書いてください。" +
+      "最初に、その日の全体像を 2〜3 文でまとめたリード文を書いてください。" +
+        "リード文は独立した行に書き、番号を付けないでください。",
+      "続けて重要なエントリを 4〜8 件選び、1 件につき 1 項目を書いてください。" +
         "同じエントリを二度扱わないでください。",
       "各項目は 1 行で、エントリ番号を角かっこで囲んだあとに要約を続けてください。" +
-        "例:「[3] ARM64 に対応した。」。番号は下のリストのものだけを使い、" +
-        "エントリの見出しをそのまま繰り返さないでください。",
+        "例:「[3] Rust のクエリが追加され、Kotlin のフレームワークも対象になった。」。" +
+        "番号は下のリストのものだけを使ってください。",
+      "読者には見出しがそのまま表示されるので、各項目には見出しにない情報" +
+        "（数値・対象範囲・条件など）を本文から必ず 1 つ入れてください。" +
+        "見出しの言い換えにしないでください。",
       `各項目は ${MAX_BULLET_CHARS} 字以内で、事実に忠実に、ひと目で読める分量にしてください。`,
       "エントリの原文が英語であっても、ダイジェストは日本語で書いてください。",
     ],
