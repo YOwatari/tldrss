@@ -266,3 +266,26 @@ describe("worker fetch (article links)", () => {
     expect(body).toContain("Invented.");
   });
 });
+
+describe("worker fetch (explicit default language)", () => {
+  it("accepts the default language spelled out", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+
+    const response = await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=en`);
+
+    expect(response.status).toBe(200);
+    expect(run.mock.calls[0][1].messages[0].content).toContain("without preamble");
+  });
+
+  it("serves lang=en from the same cache entry as no lang at all", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const { ai, run } = stubAi();
+    const env = { ...bindings, AI: ai };
+
+    await callWorker(env);
+    await callWorker(env, `${WORKER_URL}&lang=en`);
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});

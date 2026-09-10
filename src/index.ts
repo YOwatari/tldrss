@@ -19,10 +19,10 @@ export type Env = {
 const XML_HEADERS = { "content-type": "application/rss+xml; charset=utf-8" };
 
 /**
- * Languages accepted in the `lang` query parameter. Omitting it keeps the
- * default, so only the non-default languages have to be listed here.
+ * Languages accepted in the `lang` query parameter. The default is listed too,
+ * so a reader can pin the language explicitly instead of relying on the default.
  */
-const REQUESTABLE_LANGUAGES = ["ja"] as const satisfies readonly DigestLanguage[];
+const REQUESTABLE_LANGUAGES = ["en", "ja"] as const satisfies readonly DigestLanguage[];
 
 function isRequestableLanguage(value: string): value is (typeof REQUESTABLE_LANGUAGES)[number] {
   return (REQUESTABLE_LANGUAGES as readonly string[]).includes(value);
