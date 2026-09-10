@@ -5,14 +5,16 @@ import {
   isDigestLanguage,
 } from "../digest/language";
 import { renderDigestHtml, renderEntryListHtml } from "../digest/html";
-import { buildEmptyChannelXml, buildRssXml } from "../digest/rss";
+import { buildDigestXml, buildEmptyChannelXml } from "../digest/build";
 import { noRecentEntriesText } from "../digest/text";
-import { type Env, maxEntriesOf } from "../env";
+import type { Digest, DigestLinks } from "../digest/types";
+import { type Env, maxEntriesOf, shouldPostNoUpdates } from "../env";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
 import { sha256Hex } from "../hash";
 import { getDigest, putDigest } from "../store/digest-cache";
+import { putDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
 import { acquireGenerationLock, releaseGenerationLock } from "../store/generation-lock";
 import { jstDate, previousDate } from "../time";
@@ -92,14 +94,11 @@ export async function handleFeed(
   const today = await getDigest(env.DIGEST_CACHE, ref);
   if (today) return xmlResponse(today);
 
-  // Every link below travels to readers, so it is built from the path only:
-  // the `url` query parameter can carry a token for a private feed. Step 3
-  // replaces it with a per-digest page at /digest/{hash}/{date}.
-  const publicUrl = `${requestUrl.origin}${requestUrl.pathname}`;
+  const links = digestLinksOf(requestUrl, ref);
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateDigest(env, summarizer, ref, feedUrl, publicUrl));
+  ctx.waitUntil(generateDigest(env, summarizer, ref, feedUrl, links));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -109,7 +108,23 @@ export async function handleFeed(
   });
   if (yesterday) return xmlResponse(yesterday);
 
-  return xmlResponse(buildEmptyChannelXml({ publicUrl, feedTitle: feedUrl.host }));
+  return xmlResponse(
+    buildEmptyChannelXml({ feedTitle: feedUrl.host, language: ref.language, links }),
+  );
+}
+
+/**
+ * The addresses that travel to readers. Both are built from the path only: the
+ * `url` query parameter can carry a token for a private feed, and the xml they
+ * end up in is handed to every subscriber.
+ */
+function digestLinksOf(requestUrl: URL, ref: DigestRef): DigestLinks {
+  return {
+    feedUrl: `${requestUrl.origin}${requestUrl.pathname}`,
+    // The language is spelled out even when it is the default one, so the link
+    // keeps pointing at this digest if the default ever changes.
+    pageUrl: `${requestUrl.origin}/digest/${ref.hash}/${ref.date}?lang=${ref.language}`,
+  };
 }
 
 /**
@@ -164,7 +179,7 @@ async function generateDigest(
   summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
-  publicUrl: string,
+  links: DigestLinks,
 ): Promise<void> {
   // Nothing may escape: this promise is handed to `waitUntil`, where a
   // rejection would be an unhandled one. KV itself can fail, so acquiring and
@@ -174,8 +189,8 @@ async function generateDigest(
     if (!lockToken) return;
 
     try {
-      const digestXml = await buildDigest(env, summarizer, ref, feedUrl, publicUrl);
-      await putDigest(env.DIGEST_CACHE, ref, digestXml);
+      const digest = await buildDigest(env, summarizer, ref, feedUrl);
+      await storeDigest(env, digest, links);
     } finally {
       await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
     }
@@ -187,13 +202,50 @@ async function generateDigest(
   }
 }
 
+/**
+ * Stores the day's feed, and the page its item links to.
+ *
+ * A feed with nothing new gets an item-less channel, so Slack posts nothing:
+ * one message a day is the point of the digest, and a message saying there is
+ * nothing to read is worse than silence. `POST_NO_UPDATES` turns it back on
+ * for anyone who would rather see the feed report in every day.
+ *
+ * The page is written before the xml. Both land in the same KV namespace, so
+ * a reader that sees the item already finds the page behind its link.
+ */
+async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promise<void> {
+  const ref: DigestRef = {
+    hash: digest.hash,
+    date: digest.date,
+    language: digest.language,
+  };
+
+  if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
+    await putDigest(
+      env.DIGEST_CACHE,
+      ref,
+      buildEmptyChannelXml({
+        feedTitle: digest.feedTitle,
+        language: digest.language,
+        links,
+      }),
+    );
+    return;
+  }
+
+  await putDigestPage(env.DIGEST_CACHE, ref, {
+    feedTitle: digest.feedTitle,
+    html: digest.html,
+  });
+  await putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links }));
+}
+
 async function buildDigest(
   env: Env,
   summarizer: Summarizer,
   ref: DigestRef,
   feedUrl: URL,
-  publicUrl: string,
-): Promise<string> {
+): Promise<Digest> {
   const feedResponse = await fetch(feedUrl.toString());
   if (!feedResponse.ok) {
     throw new Error(`Feed responded with ${feedResponse.status}`);
@@ -203,17 +255,10 @@ async function buildDigest(
   const feedTitle = feed.title ?? feedUrl.host;
   const selection = selectRecentEntries(feed.items, { maxEntries: maxEntriesOf(env) });
 
-  const summaryHtml =
+  const html =
     selection.entries.length === 0
       ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
       : await summarizeOrList(summarizer, selection, feedTitle, ref.language);
 
-  return buildRssXml({
-    publicUrl,
-    feedHash: ref.hash,
-    digestDate: ref.date,
-    feedTitle,
-    summaryHtml,
-    language: ref.language,
-  });
+  return { ...ref, feedTitle, html, entries: selection.entries };
 }

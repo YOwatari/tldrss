@@ -3,10 +3,14 @@ A daily RSS digest proxy on Cloudflare Workers.
 
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
+- `GET /digest/{sha256(url)}/{JST date}` (add `?lang=ja` for the Japanese one) serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here.
 - `/` answers with usage instructions and doubles as a health check; any other path is a 404.
 - The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
 - Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
-- Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails.
+- Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails. The body of the page is stored beside it under `digest-html:{...}`.
+- The digest carries at most one `<item>`, its `<guid isPermaLink="false">` is `{sha256(url)}-{JST date}-{lang}`, and its `<pubDate>` is 09:00 JST of the day it covers rather than the generation time — Slack posts one message per new guid, and readers sort by `pubDate`.
+- A day the feed published nothing gets an item-less channel, so Slack posts nothing. Set `POST_NO_UPDATES` to have it report the quiet day instead.
+- Neither the guid nor any link carries the feed url: it is user-supplied and may hold a token, while the XML reaches every subscriber.
 
 ### Response timing
 Feed readers time out quickly, so `/feed` never generates a digest inside the request:
@@ -26,6 +30,7 @@ Upstream and model failures are logged and answered with 200, never with an erro
 | `AI` | Workers AI | Runs the summarization model |
 | `AI_MODEL` | var | Model id (default: `@cf/meta/llama-4-scout-17b-16e-instruct`) |
 | `MAX_ENTRIES` | var | Entries per digest (default: 30, capped at 100) |
+| `POST_NO_UPDATES` | var | Publish an item on a day with no new entries (default: off; `true` or `1` turns it on) |
 
 No API key is needed: Workers AI is billed through the account that owns the worker.
 Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://developers.cloudflare.com/workers-ai/models/).
