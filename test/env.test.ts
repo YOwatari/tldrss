@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ENTRIES_CEILING, maxEntriesOf, shouldPostNoUpdates } from "../src/env";
+import {
+  MAX_ENTRIES_CEILING,
+  maxEntriesOf,
+  publicOriginOf,
+  shouldPostNoUpdates,
+} from "../src/env";
 import { DEFAULT_MAX_ENTRIES } from "../src/feed/select";
 
 function envWith(maxEntries: unknown) {
@@ -51,5 +56,37 @@ describe("shouldPostNoUpdates", () => {
     for (const value of ["false", "0", "", "yes please", undefined]) {
       expect(shouldPostNoUpdates(envWithFlag(value))).toBe(false);
     }
+  });
+});
+
+describe("publicOriginOf", () => {
+  const envWith = (value?: string) => ({ PUBLIC_ORIGIN: value }) as never;
+
+  it("is null when the var is unset, since there is no origin to link to", () => {
+    expect(publicOriginOf({} as never)).toBeNull();
+  });
+
+  it("is the origin of the configured url", () => {
+    expect(publicOriginOf(envWith("https://tldrss.example"))).toBe(
+      "https://tldrss.example",
+    );
+  });
+
+  it("drops a path, a trailing slash and a query the var carried", () => {
+    expect(
+      publicOriginOf(envWith("https://tldrss.example/feed?url=x")),
+    ).toBe("https://tldrss.example");
+  });
+
+  it("keeps a non-default port, which is part of the address readers use", () => {
+    expect(publicOriginOf(envWith("http://localhost:8787"))).toBe(
+      "http://localhost:8787",
+    );
+  });
+
+  it("is null for a value that is not an absolute http url", () => {
+    expect(publicOriginOf(envWith("tldrss.example"))).toBeNull();
+    expect(publicOriginOf(envWith(""))).toBeNull();
+    expect(publicOriginOf(envWith("ftp://tldrss.example"))).toBeNull();
   });
 });
