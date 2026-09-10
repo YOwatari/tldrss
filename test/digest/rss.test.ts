@@ -4,7 +4,7 @@ import { buildEmptyChannelXml, buildRssXml } from "../../src/digest/rss";
 describe("buildRssXml", () => {
   it("builds valid rss with one digest item", () => {
     const xml = buildRssXml({
-      requestUrl: "https://worker.example/?url=https://source.example/rss.xml",
+      publicUrl: "https://worker.example/?url=https://source.example/rss.xml",
       feedHash: "a".repeat(64),
       digestDate: "2026-09-10",
       feedTitle: "Example Feed",
@@ -20,7 +20,7 @@ describe("buildRssXml", () => {
 
   it("gives each language its own guid so readers do not merge the items", () => {
     const params = {
-      requestUrl: "https://worker.example/",
+      publicUrl: "https://worker.example/",
       feedHash: "a".repeat(64),
       digestDate: "2026-09-10",
       feedTitle: "Example Feed",
@@ -37,7 +37,7 @@ describe("buildRssXml", () => {
 
   it("identifies the item by the feed hash, not by the url it came from", () => {
     const xml = buildRssXml({
-      requestUrl: "https://worker.example/feed",
+      publicUrl: "https://worker.example/feed",
       feedHash: "a".repeat(64),
       digestDate: "2026-09-10",
       feedTitle: "Example Feed",
@@ -51,7 +51,7 @@ describe("buildRssXml", () => {
 
   it("escapes the html body so the reader receives markup, not tags", () => {
     const xml = buildRssXml({
-      requestUrl: "https://worker.example/",
+      publicUrl: "https://worker.example/",
       feedHash: "a".repeat(64),
       digestDate: "2026-09-10",
       feedTitle: "Example Feed",
@@ -70,7 +70,7 @@ describe("buildRssXml", () => {
 
 describe("buildEmptyChannelXml", () => {
   const params = {
-    requestUrl: "https://worker.example/feed?url=https://source.example/rss.xml",
+    publicUrl: "https://worker.example/feed?url=https://source.example/rss.xml",
     feedTitle: "Example Feed",
   };
 

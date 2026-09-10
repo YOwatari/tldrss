@@ -19,7 +19,8 @@ function digestTitleOf(feedTitle: string): string {
  * post nothing, so the first crawl never shows an error.
  */
 export function buildEmptyChannelXml(params: {
-  requestUrl: string;
+  /** Worker url shown to readers; must not carry the feed url. */
+  publicUrl: string;
   feedTitle: string;
 }): string {
   const digestTitle = digestTitleOf(params.feedTitle);
@@ -28,14 +29,15 @@ export function buildEmptyChannelXml(params: {
 <rss version="2.0">
   <channel>
     <title>${escapeXml(digestTitle)}</title>
-    <link>${escapeXml(params.requestUrl)}</link>
+    <link>${escapeXml(params.publicUrl)}</link>
     <description>${escapeXml(`Daily digest for ${params.feedTitle}`)}</description>
   </channel>
 </rss>`;
 }
 
 export function buildRssXml(params: {
-  requestUrl: string;
+  /** Worker url shown to readers; must not carry the feed url. */
+  publicUrl: string;
   /** `sha256Hex` of the feed url; identifies the feed without exposing it. */
   feedHash: string;
   /** JST day the digest covers, `YYYY-MM-DD`. */
@@ -60,11 +62,11 @@ export function buildRssXml(params: {
 <rss version="2.0">
   <channel>
     <title>${escapeXml(digestTitle)}</title>
-    <link>${escapeXml(params.requestUrl)}</link>
+    <link>${escapeXml(params.publicUrl)}</link>
     <description>${escapeXml(`Daily digest for ${params.feedTitle}`)}</description>
     <item>
       <title>${escapeXml(digestTitle)}</title>
-      <link>${escapeXml(params.requestUrl)}</link>
+      <link>${escapeXml(params.publicUrl)}</link>
       <guid isPermaLink="false">${escapeXml(digestGuid)}</guid>
       <pubDate>${now.toUTCString()}</pubDate>
       <description>${description}</description>

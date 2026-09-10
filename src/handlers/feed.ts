@@ -94,9 +94,14 @@ export async function handleFeed(
   const today = await getDigest(env.DIGEST_CACHE, ref);
   if (today) return xmlResponse(today);
 
+  // Every link below travels to readers, so it is built from the path only:
+  // the `url` query parameter can carry a token for a private feed. Step 3
+  // replaces it with a per-digest page at /digest/{hash}/{date}.
+  const publicUrl = `${requestUrl.origin}${requestUrl.pathname}`;
+
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateDigest(env, ref, feedUrl, request.url));
+  ctx.waitUntil(generateDigest(env, ref, feedUrl, publicUrl));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -106,9 +111,7 @@ export async function handleFeed(
   });
   if (yesterday) return xmlResponse(yesterday);
 
-  return xmlResponse(
-    buildEmptyChannelXml({ requestUrl: request.url, feedTitle: feedUrl.host }),
-  );
+  return xmlResponse(buildEmptyChannelXml({ publicUrl, feedTitle: feedUrl.host }));
 }
 
 /**
@@ -120,7 +123,7 @@ async function generateDigest(
   env: Env,
   ref: DigestRef,
   feedUrl: URL,
-  requestUrl: string,
+  publicUrl: string,
 ): Promise<void> {
   // Nothing may escape: this promise is handed to `waitUntil`, where a
   // rejection would be an unhandled one. KV itself can fail, so acquiring and
@@ -130,7 +133,7 @@ async function generateDigest(
     if (!lockToken) return;
 
     try {
-      const digestXml = await buildDigest(env, ref, feedUrl, requestUrl);
+      const digestXml = await buildDigest(env, ref, feedUrl, publicUrl);
       await putDigest(env.DIGEST_CACHE, ref, digestXml);
     } finally {
       await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
@@ -147,7 +150,7 @@ async function buildDigest(
   env: Env,
   ref: DigestRef,
   feedUrl: URL,
-  requestUrl: string,
+  publicUrl: string,
 ): Promise<string> {
   const feedResponse = await fetch(feedUrl.toString());
   if (!feedResponse.ok) {
@@ -170,7 +173,7 @@ async function buildDigest(
         });
 
   return buildRssXml({
-    requestUrl,
+    publicUrl,
     feedHash: ref.hash,
     digestDate: ref.date,
     feedTitle,

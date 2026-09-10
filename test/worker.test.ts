@@ -521,6 +521,22 @@ describe("GET /feed (guid)", () => {
     expect(english).not.toBe(japanese);
   });
 
+  it("does not carry the feed url, and its credentials, into the links", async () => {
+    const secretUrl = "https://source.example/rss.xml?token=super-secret";
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const workerUrl = `https://worker.example/feed?url=${encodeURIComponent(secretUrl)}`;
+
+    // Both the placeholder channel and the generated digest reach readers.
+    const placeholder = await (await callWorker({ ...bindings, AI: stubAi().ai }, workerUrl)).text();
+    const digest = await (await callWorker({ ...bindings, AI: stubAi().ai }, workerUrl)).text();
+
+    for (const body of [placeholder, digest]) {
+      expect(body).toContain("<link>https://worker.example/feed</link>");
+      expect(body).not.toContain("super-secret");
+      expect(body).not.toContain("token=");
+    }
+  });
+
   it("does not carry the feed url, and its credentials, into the guid", async () => {
     const secretUrl = "https://source.example/rss.xml?token=super-secret";
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
