@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildDigestPrompt, systemPromptFor } from "../../src/llm/prompt";
 import type { DigestInput } from "../../src/llm/summarizer";
 import {
+  AI_ATTEMPT_BUDGET_MS,
   AI_TIMEOUT_MS,
   DEFAULT_AI_MODEL,
   createWorkersAiSummarizer,
@@ -26,6 +27,19 @@ function stubAi(...results: unknown[]) {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("attempt budget", () => {
+  // Generation runs in `ctx.waitUntil`, which Cloudflare extends for at most
+  // 30 seconds after the response. Every attempt has to fit inside that, with
+  // room left for the feed fetch and the KV writes.
+  it("keeps every attempt together inside the waitUntil budget", () => {
+    expect(AI_ATTEMPT_BUDGET_MS).toBeLessThanOrEqual(20_000);
+  });
+
+  it("never lets one attempt outlast the budget they share", () => {
+    expect(AI_TIMEOUT_MS).toBeLessThanOrEqual(AI_ATTEMPT_BUDGET_MS);
+  });
 });
 
 describe("createWorkersAiSummarizer", () => {
@@ -101,7 +115,7 @@ describe("createWorkersAiSummarizer", () => {
     const summarizing = createWorkersAiSummarizer({ ai }).summarize(input);
     const assertion = expect(summarizing).rejects.toThrow(/timed out/);
     // Both attempts have to time out before the summarizer gives up.
-    await vi.advanceTimersByTimeAsync(AI_TIMEOUT_MS * 2 + 1);
+    await vi.advanceTimersByTimeAsync(AI_ATTEMPT_BUDGET_MS + 1);
 
     await assertion;
     expect(run).toHaveBeenCalledTimes(2);

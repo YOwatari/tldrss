@@ -7,14 +7,23 @@ export const DEFAULT_AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct" satisf
 /** Bounds the answer, and with it the cost of one digest. */
 const MAX_TOKENS = 1024;
 
-/**
- * How long one attempt may take. Generation runs in `waitUntil`, outside any
- * response, so nothing else would ever cut a stalled call short.
- */
-export const AI_TIMEOUT_MS = 20_000;
-
 /** One retry: enough for a transient upstream failure, without doubling cost twice. */
 const MAX_ATTEMPTS = 2;
+
+/**
+ * What all attempts together may take. Generation runs in `ctx.waitUntil`,
+ * which Cloudflare extends for at most 30 seconds after the response, and the
+ * feed fetch and the KV writes come out of the same 30 seconds. A budget of 20
+ * leaves room for those: an isolate torn down mid-generation would take the
+ * fallback digest with it, so nothing would be cached at all.
+ */
+export const AI_ATTEMPT_BUDGET_MS = 20_000;
+
+/**
+ * How long one attempt may take. Nothing else would ever cut a stalled call
+ * short — no response is waiting on it.
+ */
+export const AI_TIMEOUT_MS = AI_ATTEMPT_BUDGET_MS / MAX_ATTEMPTS;
 
 function extractResponseText(result: unknown): string {
   if (typeof result === "object" && result !== null && "response" in result) {
