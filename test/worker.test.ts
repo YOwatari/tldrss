@@ -132,6 +132,19 @@ describe("worker fetch", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("says in Japanese that nothing was published when lang=ja", async () => {
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
+    stubFeedFetch(() => new Response(rssWithEntry(stale)));
+    const { ai, run } = stubAi();
+
+    const body = await (
+      await callWorker({ ...bindings, AI: ai }, `${WORKER_URL}&lang=ja`)
+    ).text();
+
+    expect(body).toContain("24 時間以内に公開された新しいエントリはありません。");
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("skips the model call when nothing was published in the last 24 hours", async () => {
     const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
     stubFeedFetch(() => new Response(rssWithEntry(stale)));

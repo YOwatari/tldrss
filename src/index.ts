@@ -3,6 +3,7 @@ import { buildRssXml } from "./digest/rss";
 import {
   DEFAULT_LANGUAGE,
   type DigestLanguage,
+  noRecentEntriesText,
   selectPromptEntries,
   summarizeEntries,
 } from "./digest/summarize";
@@ -89,7 +90,7 @@ export default {
     const feedTitle = feed.title ?? parsedFeedUrl.host;
     const summary =
       recentEntries.length === 0
-        ? "No new entries were published in the last 24 hours."
+        ? noRecentEntriesText(language)
         : await summarizeEntries({
             ai: env.AI,
             model: env.AI_MODEL,

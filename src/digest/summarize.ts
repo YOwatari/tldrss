@@ -26,6 +26,10 @@ type PromptCopy = {
   /** Formatting rules, one instruction per line. */
   rules: string[];
   note: (included: number, total: number) => string;
+  /** Shown when the model answers with nothing usable. */
+  noSummary: string;
+  /** Shown when the feed published nothing worth summarizing. */
+  noRecentEntries: string;
 };
 
 const COPY: Record<DigestLanguage, PromptCopy> = {
@@ -49,6 +53,8 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
       `Keep each bullet under ${MAX_BULLET_CHARS} characters, factual and easy to scan.`,
     ],
     note: (included, total) => `Summarizing the ${included} of ${total} most recent entries.`,
+    noSummary: "No summary generated.",
+    noRecentEntries: "No new entries were published in the last 24 hours.",
   },
   ja: {
     system:
@@ -71,10 +77,15 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     ],
     note: (included, total) =>
       `全 ${total} 件のうち、新しい方から ${included} 件を対象とします。`,
+    noSummary: "要約を生成できませんでした。",
+    noRecentEntries: "24 時間以内に公開された新しいエントリはありません。",
   },
 };
 
-export const NO_SUMMARY_FALLBACK = "No summary generated.";
+/** Digest body for a feed with nothing recent enough to summarize. */
+export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE): string {
+  return COPY[language].noRecentEntries;
+}
 
 function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
@@ -144,5 +155,5 @@ export async function summarizeEntries(params: {
     max_tokens: MAX_TOKENS,
   });
 
-  return extractResponseText(result) || NO_SUMMARY_FALLBACK;
+  return extractResponseText(result) || COPY[language].noSummary;
 }

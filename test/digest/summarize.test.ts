@@ -110,6 +110,14 @@ describe("summarizeEntries", () => {
     );
   });
 
+  it("falls back in Japanese for a Japanese digest", async () => {
+    const { ai } = stubAi({ response: "   " });
+
+    await expect(
+      summarizeEntries({ ai, feedTitle: "Example Feed", entries, language: "ja" }),
+    ).resolves.toBe("要約を生成できませんでした。");
+  });
+
   it("throws when the model returns an unexpected shape", async () => {
     const { ai } = stubAi({ unexpected: true });
 
