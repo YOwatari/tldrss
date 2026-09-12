@@ -42,16 +42,16 @@ function publishedAt(entry: FeedEntry): number | null {
  */
 export function selectRecentEntries(
   entries: FeedEntry[],
-  options: { now?: Date; maxEntries?: number } = {},
+  options: { now?: Date; maxEntries?: number; windowMs?: number; exclusiveEnd?: boolean } = {},
 ): EntrySelection {
   const nowMs = (options.now ?? new Date()).getTime();
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-  const cutoff = nowMs - WINDOW_MS;
+  const cutoff = nowMs - (options.windowMs ?? WINDOW_MS);
 
   const dated = entries
     .map((entry) => ({ entry, at: publishedAt(entry) }))
     .filter((item): item is { entry: FeedEntry; at: number } => item.at !== null)
-    .filter((item) => item.at >= cutoff && item.at <= nowMs)
+    .filter((item) => item.at >= cutoff && (options.exclusiveEnd ? item.at < nowMs : item.at <= nowMs))
     // Feeds are not required to be newest-first, so order before capping.
     .sort((left, right) => right.at - left.at);
 

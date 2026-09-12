@@ -10,6 +10,7 @@ import { channelTitleText, channelDescriptionText, itemTitleText } from "./text"
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
 import type { Digest, DigestLinks } from "./types";
 import { digestPubDate } from "../time";
+import { type DigestPeriod } from "./period";
 
 function escapeXml(text: string): string {
   return text
@@ -46,15 +47,16 @@ function cdata(html: string): string {
 function channelHead(params: {
   feedTitle: string;
   language: DigestLanguage;
+  period?: DigestPeriod;
   links: DigestLinks;
   now: Date;
 }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>${escapeXml(channelTitleText(params.feedTitle, params.language))}</title>
+    <title>${escapeXml(channelTitleText(params.feedTitle, params.language, params.period))}</title>
     <link>${escapeXml(params.links.siteUrl)}</link>
-    <description>${escapeXml(channelDescriptionText(params.feedTitle, params.language))}</description>
+    <description>${escapeXml(channelDescriptionText(params.feedTitle, params.language, params.period))}</description>
     <lastBuildDate>${params.now.toUTCString()}</lastBuildDate>`;
 }
 
@@ -73,16 +75,17 @@ export function buildDigestXml(params: {
   // reader, and a feed url can carry a token in its query string.
   // Readers deduplicate by guid, so the languages must not share one: two
   // subscriptions to the same feed would otherwise collapse into one item.
-  const guid = `${digest.hash}-${digest.date}-${digest.language}`;
+  const guid = `${digest.hash}-${digest.date}-${digest.language}${digest.period === "weekly" ? "-weekly" : ""}`;
 
   return `${channelHead({
     feedTitle: digest.feedTitle,
     language: digest.language,
+    period: digest.period,
     links,
     now,
   })}
     <item>
-      <title>${escapeXml(itemTitleText(digest.feedTitle, digest.date, digest.language))}</title>
+      <title>${escapeXml(itemTitleText(digest.feedTitle, digest.date, digest.language, digest.period))}</title>
       <link>${escapeXml(links.pageUrl)}</link>
       <guid isPermaLink="false">${escapeXml(guid)}</guid>
       <pubDate>${digestPubDate(digest.date)}</pubDate>
@@ -101,12 +104,14 @@ ${CHANNEL_TAIL}`;
 export function buildEmptyChannelXml(params: {
   feedTitle: string;
   language?: DigestLanguage;
+  period?: DigestPeriod;
   links: DigestLinks;
   now?: Date;
 }): string {
   return `${channelHead({
     feedTitle: params.feedTitle,
     language: params.language ?? DEFAULT_LANGUAGE,
+    period: params.period,
     links: params.links,
     now: params.now ?? new Date(),
   })}

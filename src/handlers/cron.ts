@@ -14,6 +14,7 @@ import type { DigestRef } from "../store/digest-ref";
 import { putCronStatus, type CronRunSummary } from "../store/cron-status";
 import { getSubscription, listSubscriptions, remove, SUBSCRIPTION_TTL_SECONDS, type SubscriptionEntry } from "../store/subscriptions";
 import { jstDate } from "../time";
+import { periodDate } from "../digest/period";
 
 /**
  * How many feeds are generated at once.
@@ -47,7 +48,7 @@ export type { CronRunSummary } from "../store/cron-status";
  * by the JST day that window ends on — 23:50 UTC is already tomorrow in Tokyo.
  *
  * Only `DEFAULT_LANGUAGE` is pre-generated. A subscription is keyed by feed
- * url alone, so nothing here says which language a reader crawls in, and
+ * and period, so nothing here says which language a reader crawls in, and
  * generating every language would multiply the model cost of the run by the
  * number of them. A crawl in another language still gets its digest built in
  * the background, one day behind on the first morning.
@@ -90,16 +91,15 @@ export async function handleScheduled(
       if (isStale(subscription, scheduledAt)) {
         // A crawl may have refreshed the record since listing. KV has no
         // atomic conditional delete, but re-reading narrows that race.
-        const latest = await getSubscription(env.DIGEST_CACHE, subscription.hash);
+        const latest = await getSubscription(env.DIGEST_CACHE, subscription.hash, subscription.period);
         if (!latest || isStale(latest, scheduledAt)) {
-          if (latest) await remove(env.DIGEST_CACHE, subscription.hash);
+          if (latest) await remove(env.DIGEST_CACHE, subscription.hash, subscription.period);
           tally.skipped += 1;
           return;
         }
         subscription = { ...latest, hash: subscription.hash };
       }
       const outcome = await generateFor(env, summarizer, subscription, {
-        date,
         origin,
         now: scheduledAt,
       });
@@ -131,12 +131,13 @@ function generateFor(
   env: Env,
   summarizer: Summarizer,
   subscription: SubscriptionEntry,
-  run: { date: string; origin: string; now: Date },
+  run: { origin: string; now: Date },
 ): Promise<GenerationOutcome> {
   const ref: DigestRef = {
     hash: subscription.hash,
-    date: run.date,
+    date: periodDate(run.now, subscription.period),
     language: DEFAULT_LANGUAGE,
+    period: subscription.period,
   };
 
   return generateDigest({

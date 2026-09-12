@@ -3,6 +3,7 @@
  * from the feed, so the model's answer only ever contributes prose.
  */
 import type { FeedEntry } from "../feed/parse";
+import type { DigestPeriod } from "./period";
 import { sanitizeLlmHtml } from "../llm/sanitize";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
 import { summaryUnavailableText, untitledEntryText } from "./text";
@@ -150,8 +151,9 @@ export function renderDigestHtml(
 export function renderEntryListHtml(
   entries: FeedEntry[],
   language: DigestLanguage = DEFAULT_LANGUAGE,
+  period: DigestPeriod = "daily",
 ): string {
-  const notice = `<p>${escapeHtml(summaryUnavailableText(language))}</p>`;
+  const notice = `<p>${escapeHtml(summaryUnavailableText(language, period))}</p>`;
   if (entries.length === 0) return notice;
 
   const items = entries.map((entry) => `  <li>${renderHeading(entry, language)}</li>`);

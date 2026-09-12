@@ -1,4 +1,5 @@
 import type { DigestLanguage } from "../digest/language";
+import type { DigestPeriod } from "../digest/period";
 import type { FeedEntry } from "../feed/parse";
 
 export type DigestInput = {
@@ -10,12 +11,13 @@ export type DigestInput = {
    */
   entries: FeedEntry[];
   /**
-   * Dated entries the 24-hour window held before the cap applied, so the
+   * Dated entries the selected window held before the cap applied, so the
    * prompt can say when the model is seeing a subset. Never below
    * `entries.length`.
    */
   availableCount: number;
   language: DigestLanguage;
+  period?: DigestPeriod;
 };
 
 /**

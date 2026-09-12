@@ -1,4 +1,5 @@
 import type { DigestRef } from "./digest-ref";
+import { periodSuffix } from "../digest/period";
 
 /**
  * Long enough to outlast a generation (feed fetch + one model call), short
@@ -14,7 +15,7 @@ export const GENERATION_LOCK_TTL_SECONDS = 5 * 60;
 const inFlight = new Set<string>();
 
 export function generationLockKey(ref: DigestRef): string {
-  return `generating:${ref.hash}:${ref.date}:${ref.language}`;
+  return `generating:${ref.hash}:${ref.date}:${ref.language}${periodSuffix(ref.period)}`;
 }
 
 /**

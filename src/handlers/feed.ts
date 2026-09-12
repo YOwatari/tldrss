@@ -12,7 +12,7 @@ import { register, touch, SubscriptionLimitError } from "../store/subscriptions"
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
-import { jstDate, previousDate } from "../time";
+import { isDigestPeriod, periodDate, previousPeriodDate } from "../digest/period";
 
 /**
  * Slack polls every 15-30 minutes, so five minutes of edge caching cuts
@@ -79,6 +79,11 @@ export async function handleFeed(
     );
   }
   const language: DigestLanguage = requestedLanguage ?? DEFAULT_LANGUAGE;
+  const period = requestUrl.searchParams.get("period") ?? "daily";
+  if (!isDigestPeriod(period)) {
+    return new Response("Unsupported period query parameter. Supported: daily, weekly", { status: 400 });
+  }
+  const now = new Date();
 
   if (!isFeedAllowed(env, feedUrl, requestUrl.searchParams.get("token"))) {
     return new Response("Feed access forbidden", { status: 403 });
@@ -86,9 +91,9 @@ export async function handleFeed(
 
   let hash: string;
   try {
-    const subscription = await register(env.DIGEST_CACHE, feedUrl.toString(), new Date(), maxSubscriptionsOf(env));
+    const subscription = await register(env.DIGEST_CACHE, feedUrl.toString(), now, maxSubscriptionsOf(env), period);
     hash = subscription.hash;
-    await touch(env.DIGEST_CACHE, hash);
+    await touch(env.DIGEST_CACHE, hash, now, period);
   } catch (error) {
     if (error instanceof SubscriptionLimitError) {
       return new Response("Subscription limit reached", { status: 429 });
@@ -101,8 +106,9 @@ export async function handleFeed(
 
   const ref: DigestRef = {
     hash,
-    date: jstDate(),
+    date: periodDate(now, period),
     language,
+    period,
   };
 
   const today = await getDigest(env.DIGEST_CACHE, ref);
@@ -118,12 +124,12 @@ export async function handleFeed(
   // (or a previous background generation) has not produced one yet.
   const yesterday = await getDigest(env.DIGEST_CACHE, {
     ...ref,
-    date: previousDate(ref.date),
+    date: previousPeriodDate(ref.date, period),
   });
   if (yesterday) return xmlResponse(yesterday);
 
   return xmlResponse(
-    buildEmptyChannelXml({ feedTitle: feedUrl.host, language: ref.language, links }),
+    buildEmptyChannelXml({ feedTitle: feedUrl.host, language: ref.language, period, links }),
   );
 }
 

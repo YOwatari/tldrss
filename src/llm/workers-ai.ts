@@ -63,7 +63,7 @@ export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): S
     const result = await withTimeout(
       params.ai.run(model, {
         messages: [
-          { role: "system", content: systemPromptFor(input.language) },
+          { role: "system", content: systemPromptFor(input.language, input.period) },
           { role: "user", content: buildDigestPrompt(input) },
         ],
         max_tokens: MAX_TOKENS,
