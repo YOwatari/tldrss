@@ -8,10 +8,10 @@ import { createWorkersAiSummarizer } from "./llm/workers-ai";
 export type { Env };
 
 const USAGE = [
-  "tldrss - a daily RSS digest proxy.",
+  "tldrss - a daily or weekly RSS digest proxy.",
   "",
-  "GET /feed?url=<feed url>[&lang=en|ja]",
-  "GET /digest/<feed hash>/<YYYY-MM-DD>[?lang=en|ja]",
+  "GET /feed?url=<feed url>[&lang=en|ja][&period=daily|weekly]",
+  "GET /digest/<feed hash>/<YYYY-MM-DD>[?lang=en|ja][&period=daily|weekly]",
   "GET /health (Cron status)",
 ].join("\n");
 

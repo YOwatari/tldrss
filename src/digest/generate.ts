@@ -11,6 +11,7 @@
 import { buildDigestXml, buildEmptyChannelXml } from "./build";
 import { renderDigestHtml, renderEntryListHtml } from "./html";
 import type { DigestLanguage } from "./language";
+import { periodDays, type DigestPeriod } from "./period";
 import { noRecentEntriesText } from "./text";
 import type { Digest, DigestLinks } from "./types";
 import { type Env, maxEntriesOf, shouldPostNoUpdates } from "../env";
@@ -59,7 +60,7 @@ export function digestLinksOf(origin: string, ref: DigestRef): DigestLinks {
     siteUrl: `${origin}/`,
     // The language is spelled out even when it is the default one, so the link
     // keeps pointing at this digest if the default ever changes.
-    pageUrl: `${origin}/digest/${ref.hash}/${ref.date}?lang=${ref.language}`,
+    pageUrl: `${origin}/digest/${ref.hash}/${ref.date}?lang=${ref.language}${ref.period === "weekly" ? "&period=weekly" : ""}`,
   };
 }
 
@@ -112,6 +113,7 @@ async function summarizeOrList(
   selection: EntrySelection,
   feedTitle: string,
   language: DigestLanguage,
+  period: DigestPeriod = "daily",
 ): Promise<string> {
   try {
     const summary = await summarizer.summarize({
@@ -119,6 +121,7 @@ async function summarizeOrList(
       entries: selection.entries,
       availableCount: selection.availableCount,
       language,
+      period,
     });
 
     // Reference markers are numbered against the list the prompt used.
@@ -134,7 +137,7 @@ async function summarizeOrList(
     // feed content, but provider errors do not contain the original prompt.
     console.error(`Failed to summarize ${selection.entries.length} entries`, error);
 
-    return renderEntryListHtml(selection.entries, language);
+    return renderEntryListHtml(selection.entries, language, period);
   }
 }
 
@@ -154,6 +157,7 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
     hash: digest.hash,
     date: digest.date,
     language: digest.language,
+    period: digest.period,
   };
 
   if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
@@ -163,6 +167,7 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
       buildEmptyChannelXml({
         feedTitle: digest.feedTitle,
         language: digest.language,
+        period: digest.period,
         links,
       }),
     );
@@ -190,12 +195,17 @@ async function buildDigest(
 
   const feed = parseFeed(await feedResponse.text());
   const feedTitle = feed.title ?? feedUrl.host;
-  const selection = selectRecentEntries(feed.items, { now, maxEntries: maxEntriesOf(env) });
+  const selection = selectRecentEntries(feed.items, {
+    now: ref.period === "weekly" ? new Date(`${ref.date}T00:00:00+09:00`) : now,
+    maxEntries: maxEntriesOf(env),
+    windowMs: periodDays(ref.period) * 86_400_000,
+    exclusiveEnd: ref.period === "weekly",
+  });
 
   const html =
     selection.entries.length === 0
-      ? renderDigestHtml(noRecentEntriesText(ref.language), [], ref.language)
-      : await summarizeOrList(summarizer, selection, feedTitle, ref.language);
+      ? renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language)
+      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period);
 
   return { ...ref, feedTitle, html, entries: selection.entries };
 }

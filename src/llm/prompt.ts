@@ -1,4 +1,5 @@
 import type { DigestLanguage } from "../digest/language";
+import type { DigestPeriod } from "../digest/period";
 import { untitledEntryText } from "../digest/text";
 import type { FeedEntry } from "../feed/parse";
 import type { DigestInput } from "./summarizer";
@@ -15,7 +16,7 @@ export const MAX_BULLET_CHARS = 80;
 
 type PromptCopy = {
   system: string;
-  intro: (feedTitle: string) => string;
+  intro: (feedTitle: string, period: DigestPeriod) => string;
   /** Formatting rules, one instruction per line. */
   rules: string[];
   note: (included: number, available: number) => string;
@@ -26,8 +27,8 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     system:
       "You are an editor who writes short, factual daily digests of RSS feeds. " +
       "Answer with the digest only, without preamble.",
-    intro: (feedTitle) =>
-      `Create a concise daily digest of the following RSS entries from "${feedTitle}".`,
+    intro: (feedTitle, period) =>
+      `Create a concise ${period} digest of the following RSS entries from "${feedTitle}".`,
     rules: [
       "Open with a 2-3 sentence lead saying what the day was about, on its own " +
         "line and without any number.",
@@ -51,8 +52,8 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
     system:
       "あなたは RSS フィードの日次ダイジェストを簡潔かつ事実に忠実にまとめる編集者です。" +
       "前置きや後書きを付けず、ダイジェスト本文だけを日本語で出力してください。",
-    intro: (feedTitle) =>
-      `次の「${feedTitle}」の RSS エントリから、日次ダイジェストを作成してください。`,
+    intro: (feedTitle, period) =>
+      `次の「${feedTitle}」の RSS エントリから、${period === "weekly" ? "週次" : "日次"}ダイジェストを作成してください。`,
     rules: [
       "最初に、その日の全体像を 2〜3 文でまとめたリード文を書いてください。" +
         "リード文は独立した行に書き、番号を付けないでください。",
@@ -76,8 +77,12 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
 };
 
 /** Instruction sent as the system message, ahead of the digest prompt. */
-export function systemPromptFor(language: DigestLanguage): string {
-  return COPY[language].system;
+function periodCopy(text: string, period: DigestPeriod = "daily"): string {
+  return period === "daily" ? text : text.replaceAll("daily", "weekly").replaceAll("the day", "the week").replaceAll("日次", "週次").replaceAll("その日", "その週");
+}
+
+export function systemPromptFor(language: DigestLanguage, period: DigestPeriod = "daily"): string {
+  return periodCopy(COPY[language].system, period);
 }
 
 function truncate(text: string, limit: number): string {
@@ -107,5 +112,5 @@ export function buildDigestPrompt(input: DigestInput): string {
       ? [copy.note(input.entries.length, input.availableCount)]
       : [];
 
-  return [copy.intro(feedTitle), ...copy.rules, ...note, "", ...blocks].join("\n");
+  return [copy.intro(feedTitle, input.period ?? "daily"), ...copy.rules.map(rule => periodCopy(rule, input.period)), ...note, "", ...blocks].join("\n");
 }

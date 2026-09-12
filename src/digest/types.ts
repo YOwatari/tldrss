@@ -7,6 +7,7 @@
  */
 import type { FeedEntry } from "../feed/parse";
 import type { DigestLanguage } from "./language";
+import type { DigestPeriod } from "./period";
 
 export type Digest = {
   /** `sha256Hex` of the normalized feed url; identifies the feed. */
@@ -14,6 +15,7 @@ export type Digest = {
   /** JST calendar day the digest covers, `YYYY-MM-DD`. */
   date: string;
   language: DigestLanguage;
+  period?: DigestPeriod;
   /** Title the source feed gave itself, or its host. */
   feedTitle: string;
   /** Digest body as a sanitized HTML fragment; see `renderDigestHtml`. */

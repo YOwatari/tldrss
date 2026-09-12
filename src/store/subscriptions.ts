@@ -1,9 +1,10 @@
 import { sha256Hex } from "../hash";
+import { isDigestPeriod, periodSuffix, type DigestPeriod } from "../digest/period";
 
 /**
  * The feeds the cron run pre-generates a digest for.
  *
- * One key per feed rather than one list under a single key: several feeds are
+ * One key per feed and period rather than one list: several feeds are
  * crawled at once, and a read-modify-write of a shared list would drop the
  * subscriptions written between one crawl's read and its write. Separate keys
  * cannot race each other, at the price of one read per feed when listing.
@@ -16,6 +17,7 @@ export const SUBSCRIPTION_PREFIX = "sub:";
 const DEFAULT_PAGE_SIZE = 100;
 
 export type Subscription = {
+  period?: DigestPeriod;
   /** The normalized feed url, as `handlers/feed.ts` spells it. */
   url: string;
   /** ISO instant the feed was first crawled. */
@@ -33,8 +35,8 @@ export type SubscriptionEntry = Subscription & {
   hash: string;
 };
 
-export function subscriptionKey(hash: string): string {
-  return `${SUBSCRIPTION_PREFIX}${hash}`;
+export function subscriptionKey(hash: string, period: DigestPeriod = "daily"): string {
+  return `${SUBSCRIPTION_PREFIX}${hash}${periodSuffix(period)}`;
 }
 
 /** Whether a value read back from KV is a record this module wrote. */
@@ -43,6 +45,7 @@ function isSubscription(value: unknown): value is Subscription {
 
   const record = value as Record<string, unknown>;
   return (
+    (record.period === undefined || (typeof record.period === "string" && isDigestPeriod(record.period))) &&
     typeof record.url === "string" &&
     typeof record.registeredAt === "string" &&
     typeof record.lastSeenAt === "string"
@@ -65,7 +68,7 @@ export async function putSubscription(
   hash: string,
   subscription: Subscription,
 ): Promise<void> {
-  await cache.put(subscriptionKey(hash), JSON.stringify(subscription), {
+  await cache.put(subscriptionKey(hash, subscription.period), JSON.stringify(subscription), {
     expirationTtl: SUBSCRIPTION_TTL_SECONDS,
   });
 }
@@ -100,7 +103,7 @@ export async function listSubscriptions(
       const subscription = parseSubscription(stored);
       if (!subscription) continue;
 
-      entries.push({ hash: key.name.slice(SUBSCRIPTION_PREFIX.length), ...subscription });
+      entries.push({ hash: key.name.slice(SUBSCRIPTION_PREFIX.length).split(":")[0], ...subscription });
     }
 
     cursor = page.list_complete ? undefined : page.cursor;
@@ -115,8 +118,8 @@ export const TOUCH_INTERVAL_MS = 12 * 60 * 60 * 1000;
 export class SubscriptionLimitError extends Error {}
 
 /** Read a subscription without listing the namespace on each crawl. */
-export async function getSubscription(cache: KVNamespace, hash: string): Promise<Subscription | null> {
-  const stored = await cache.get(subscriptionKey(hash));
+export async function getSubscription(cache: KVNamespace, hash: string, period: DigestPeriod = "daily"): Promise<Subscription | null> {
+  const stored = await cache.get(subscriptionKey(hash, period));
   return stored === null ? null : parseSubscription(stored);
 }
 
@@ -128,9 +131,10 @@ export async function getSubscription(cache: KVNamespace, hash: string): Promise
  */
 export async function register(
   cache: KVNamespace, url: string, now = new Date(), maximum = 20,
+  period: DigestPeriod = "daily",
 ): Promise<SubscriptionEntry> {
   const hash = await sha256Hex(url);
-  const existing = await getSubscription(cache, hash);
+  const existing = await getSubscription(cache, hash, period);
   if (existing) return { ...existing, hash };
 
   const previous = admissions.get(cache) ?? Promise.resolve();
@@ -140,12 +144,12 @@ export async function register(
   await previous;
   try {
     // Another admission may have registered this URL while we waited.
-    const registered = await getSubscription(cache, hash);
+    const registered = await getSubscription(cache, hash, period);
     if (registered) return { ...registered, hash };
     if ((await listSubscriptions(cache)).length >= maximum) {
       throw new SubscriptionLimitError("Subscription limit reached");
     }
-    const subscription = { url, registeredAt: now.toISOString(), lastSeenAt: now.toISOString() };
+    const subscription = { url, ...(period === "daily" ? {} : { period }), registeredAt: now.toISOString(), lastSeenAt: now.toISOString() };
     await putSubscription(cache, hash, subscription);
     return { ...subscription, hash };
   } finally {
@@ -156,14 +160,14 @@ export async function register(
 const admissions = new WeakMap<KVNamespace, Promise<void>>();
 
 /** Returns true only when a twelve-hour refresh was written; missing is a no-op. */
-export async function touch(cache: KVNamespace, hash: string, now = new Date()): Promise<boolean> {
-  const subscription = await getSubscription(cache, hash);
+export async function touch(cache: KVNamespace, hash: string, now = new Date(), period: DigestPeriod = "daily"): Promise<boolean> {
+  const subscription = await getSubscription(cache, hash, period);
   if (!subscription || now.getTime() - Date.parse(subscription.lastSeenAt) < TOUCH_INTERVAL_MS) return false;
   await putSubscription(cache, hash, { ...subscription, lastSeenAt: now.toISOString() });
   return true;
 }
 
 /** Idempotently delete a subscription. Expiration handles unattended feeds. */
-export async function remove(cache: KVNamespace, hash: string): Promise<void> {
-  await cache.delete(subscriptionKey(hash));
+export async function remove(cache: KVNamespace, hash: string, period: DigestPeriod = "daily"): Promise<void> {
+  await cache.delete(subscriptionKey(hash, period));
 }

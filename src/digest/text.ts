@@ -1,4 +1,5 @@
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
+import type { DigestPeriod } from "./period";
 
 /**
  * Wording the worker writes itself. Everything here reaches the reader without
@@ -23,12 +24,14 @@ export function untitledEntryText(language: DigestLanguage = DEFAULT_LANGUAGE): 
 }
 
 /** Digest body for a feed with nothing recent enough to summarize. */
-export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE): string {
+export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE, period: DigestPeriod = "daily"): string {
+  if (period === "weekly") return language === "ja" ? "対象の週に公開された新しいエントリはありません。" : "No new entries were published in the covered week.";
   return TEXT[language].noRecentEntries;
 }
 
 /** Lead paragraph of the digest served when the model could not be reached. */
-export function summaryUnavailableText(language: DigestLanguage = DEFAULT_LANGUAGE): string {
+export function summaryUnavailableText(language: DigestLanguage = DEFAULT_LANGUAGE, period: DigestPeriod = "daily"): string {
+  if (period === "weekly") return language === "ja" ? "要約を生成できませんでした。対象の週のエントリを一覧で掲載します。" : "A summary could not be generated, so the week's entries are listed below.";
   return TEXT[language].summaryUnavailable;
 }
 
@@ -39,7 +42,9 @@ export function summaryUnavailableText(language: DigestLanguage = DEFAULT_LANGUA
 export function channelTitleText(
   feedTitle: string,
   language: DigestLanguage = DEFAULT_LANGUAGE,
+  period: DigestPeriod = "daily",
 ): string {
+  if (period === "weekly") return language === "ja" ? `【週刊要約】${feedTitle}` : `Weekly Digest: ${feedTitle}`;
   return language === "ja" ? `【日刊要約】${feedTitle}` : `Daily Digest: ${feedTitle}`;
 }
 
@@ -47,7 +52,9 @@ export function channelTitleText(
 export function channelDescriptionText(
   feedTitle: string,
   language: DigestLanguage = DEFAULT_LANGUAGE,
+  period: DigestPeriod = "daily",
 ): string {
+  if (period === "weekly") return language === "ja" ? `${feedTitle} の週刊要約` : `Weekly digest for ${feedTitle}`;
   return language === "ja"
     ? `${feedTitle} の日刊要約`
     : `Daily digest for ${feedTitle}`;
@@ -61,6 +68,7 @@ export function itemTitleText(
   feedTitle: string,
   date: string,
   language: DigestLanguage = DEFAULT_LANGUAGE,
+  period: DigestPeriod = "daily",
 ): string {
-  return `${channelTitleText(feedTitle, language)} (${date})`;
+  return `${channelTitleText(feedTitle, language, period)} (${date})`;
 }

@@ -1,5 +1,25 @@
 # tldrss
-A daily RSS digest proxy on Cloudflare Workers.
+A daily or weekly RSS digest proxy on Cloudflare Workers.
+
+## Aggregation period
+
+Choose a period per subscription with `period=daily` (default) or `period=weekly`:
+
+```text
+/feed?url=https%3A%2F%2Fexample.com%2Frss.xml&lang=ja&period=weekly
+```
+
+- `daily` preserves the existing behavior: the last 24 hours at generation time, one edition per JST date.
+- `weekly` summarizes the completed JST calendar week, Monday 00:00 inclusive to the following Monday 00:00 exclusive. The edition is dated by that ending Monday, with a fixed 09:00 JST publication time. For example, the September 14 edition covers September 7–13. A midweek subscription receives this completed week's edition too.
+- The daily 08:50 JST Cron also processes weekly subscriptions. Once a weekly edition is cached, subsequent runs skip it; the next Monday produces the next edition. Cron pre-generates only English, as before.
+- Weekly XML and HTML are retained for 14 days, and a cache miss falls back to the previous week while generating in the background. Daily retention remains 48 hours.
+- Periods have separate subscription records, cache keys, generation locks and item GUIDs. Weekly keys append `:weekly`; weekly GUIDs append `-weekly`; page links include `&period=weekly`. Existing daily keys, GUIDs and links remain valid.
+- Daily and weekly subscriptions to the same source each count toward `MAX_SUBSCRIPTIONS`. Both expire after 8 days without reader polls; the period controls publication, not polling frequency.
+- Only articles still present in the upstream feed can be summarized. Weekly mode does not archive articles that disappeared from the source before generation. `MAX_ENTRIES` still limits the selected articles (default 30).
+
+Unsupported periods return HTTP 400. The implementation currently supports daily and weekly; shared period logic lives in `src/digest/period.ts`.
+
+The details below describe the default daily mode unless otherwise stated.
 
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
@@ -125,6 +145,7 @@ Construct the Slack URL with URL encoding, especially when the source feed has i
 const subscription = new URL("https://tldrss.example/feed");
 subscription.searchParams.set("url", "https://example.com/rss.xml?category=tech&format=rss");
 subscription.searchParams.set("lang", "ja"); // optional; default en
+subscription.searchParams.set("period", "weekly"); // optional; default daily
 subscription.searchParams.set("token", "your-secret"); // omit when using only allowed hosts
 console.log(subscription.href);
 ```

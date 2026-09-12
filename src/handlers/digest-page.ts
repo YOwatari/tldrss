@@ -16,6 +16,7 @@ import {
 import type { Env } from "../env";
 import { type DigestPage, getDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
+import { isDigestPeriod } from "../digest/period";
 
 /** `/digest/{sha256 hex}/{YYYY-MM-DD}`, and nothing else. */
 const PATH_PATTERN = /^\/digest\/([0-9a-f]{64})\/(\d{4}-\d{2}-\d{2})$/;
@@ -71,7 +72,7 @@ function notFound(): Response {
  * would show the reader tags instead of a digest.
  */
 function renderPage(page: DigestPage, ref: DigestRef): string {
-  const title = escapeHtml(itemTitleText(page.feedTitle, ref.date, ref.language));
+  const title = escapeHtml(itemTitleText(page.feedTitle, ref.date, ref.language, ref.period));
 
   return `<!DOCTYPE html>
 <html lang="${ref.language}">
@@ -106,7 +107,11 @@ export async function handleDigestPage(request: Request, env: Env): Promise<Resp
   }
   const language: DigestLanguage = requestedLanguage ?? DEFAULT_LANGUAGE;
 
-  const ref: DigestRef = { hash: match[1], date: match[2], language };
+  const period = requestUrl.searchParams.get("period") ?? "daily";
+  if (!isDigestPeriod(period)) {
+    return new Response("Unsupported period query parameter. Supported: daily, weekly", { status: 400 });
+  }
+  const ref: DigestRef = { hash: match[1], date: match[2], language, period };
 
   const page = await getDigestPage(env.DIGEST_CACHE, ref);
   if (!page) return notFound();
