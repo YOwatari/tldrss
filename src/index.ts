@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { handleScheduled } from "./handlers/cron";
 import { handleDigestPage } from "./handlers/digest-page";
 import { handleFeed } from "./handlers/feed";
+import { handleHealth } from "./handlers/health";
 import { createWorkersAiSummarizer } from "./llm/workers-ai";
 
 export type { Env };
@@ -11,12 +12,13 @@ const USAGE = [
   "",
   "GET /feed?url=<feed url>[&lang=en|ja]",
   "GET /digest/<feed hash>/<YYYY-MM-DD>[?lang=en|ja]",
+  "GET /health (Cron status)",
 ].join("\n");
 
 /** Readers only ever read, and generation is too costly to let anyone POST. */
 const SERVED_METHODS = ["GET", "HEAD"];
 
-const ROUTES = ["/feed", "/"];
+const ROUTES = ["/feed", "/health", "/"];
 
 /**
  * Digest pages, whose path carries the digest it serves. The handler decides
@@ -41,6 +43,8 @@ export default {
       });
     }
 
+    if (pathname === "/health") return handleHealth(request, env);
+
     // The composition root is the only place that names a model provider;
     // everything downstream sees a `Summarizer`.
     if (pathname === "/feed") {
@@ -53,7 +57,7 @@ export default {
       return handleDigestPage(request, env);
     }
 
-    // Doubles as the health check: a plain 200 with no binding access.
+    // Liveness only; /health checks the scheduled run and its KV record.
     return new Response(USAGE, { headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 
