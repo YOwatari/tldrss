@@ -4,10 +4,21 @@ compatibility_date = "2026-08-22"
 
 [[kv_namespaces]]
 binding = "DIGEST_CACHE"
-id = "placeholder"
+id = "fe83c720db4449308a260a4bbc8c2084"
+preview_id = "6b51d76b62f64f8185cef65eb2d48c71"
 
 [ai]
 binding = "AI"
+remote = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Feed URLs may contain credentials. Keep application logs without recording
+# the complete request URL in invocation logs.
+[observability.logs]
+invocation_logs = false
 
 # 23:50 UTC is 08:50 JST: the digests are in KV before the 09:00 crawl, and
 # the ten minutes are the margin the run has to finish in.
@@ -16,7 +27,7 @@ crons = ["50 23 * * *"]
 
 [vars]
 # Set exact feed hostnames, comma-separated, or configure FEED_TOKEN as a secret.
-ALLOWED_FEED_HOSTS = ""
+ALLOWED_FEED_HOSTS = "news.ycombinator.com"
 MAX_SUBSCRIPTIONS = "20"
 AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 # Entries per digest. Bounds the prompt, and with it the cost of one digest.
@@ -28,4 +39,4 @@ POST_NO_UPDATES = "false"
 # read an origin off, and every link it stores has to be absolute, so a run
 # without this var generates nothing. Set it to the deployed hostname
 # (`https://tldrss.<subdomain>.workers.dev` or a custom domain).
-PUBLIC_ORIGIN = ""
+PUBLIC_ORIGIN = "https://tldrss.yowatari.workers.dev"

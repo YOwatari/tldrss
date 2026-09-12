@@ -130,10 +130,8 @@ async function summarizeOrList(
 
     return html;
   } catch (error) {
-    // Unlike the failure a caller logs for a rejected generation, this one
-    // comes from the model rather than from the feed url, so it carries no
-    // credentials and is logged whole: a timeout and an unusable answer need
-    // telling apart.
+    // Keep the provider error for operational triage. The summarizer receives
+    // feed content, but provider errors do not contain the original prompt.
     console.error(`Failed to summarize ${selection.entries.length} entries`, error);
 
     return renderEntryListHtml(selection.entries, language);

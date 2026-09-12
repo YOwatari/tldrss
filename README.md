@@ -4,7 +4,7 @@ A daily RSS digest proxy on Cloudflare Workers.
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
 - `GET /digest/{sha256(url)}/{JST date}?lang={en|ja}` serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here. The item link always spells the language out, `lang=en` included, so it keeps pointing at the same digest if the default ever changes; `lang` may be omitted when requesting the page by hand, and then defaults to `en`.
-- `/` answers with usage instructions and doubles as a health check; any other path is a 404.
+- `/` answers with usage instructions; `/health` reports Cron and storage health, and any other path is a 404.
 - The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
 - Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
 - Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails. The body of the page is stored beside it under `digest-html:{...}`.
@@ -57,6 +57,34 @@ Swapping the model provider means implementing `Summarizer` (`src/llm/summarizer
 npm ci
 ```
 
+### Production deployment
+
+The checked-in `wrangler.toml` is configured for the `tldrss` Worker, the
+remote `DIGEST_CACHE` namespace, the `news.ycombinator.com` validation feed,
+and `https://tldrss.yowatari.workers.dev` as `PUBLIC_ORIGIN`. Replace the
+allowed hostname and origin before deploying to another account or domain.
+
+```sh
+npx wrangler login
+npx wrangler kv namespace create DIGEST_CACHE
+npx wrangler kv namespace create DIGEST_CACHE --preview
+# Put the returned ids in wrangler.toml, then:
+npx wrangler secret put FEED_TOKEN       # optional when ALLOWED_FEED_HOSTS is set
+npx wrangler deploy
+curl -i https://tldrss.yowatari.workers.dev/
+curl -i https://tldrss.yowatari.workers.dev/health
+```
+
+Workers AI uses the account's AI binding; no Gemini key is needed. `/health`
+reports 503 until the first Cron run completes, then reports generation
+failures or a missed run after a 15-minute grace period. It never includes feed
+URLs or exception text. Cron JSON and custom logs are available in Workers
+Observability; filter for `event = "cron.digest"` and inspect `failed`.
+
+The expected schedule is 08:50 JST (`50 23 * * *` UTC). Exercise it locally
+with `npx wrangler dev --test-scheduled` and
+`curl "http://localhost:8787/__scheduled?cron=50+23+*+*+*"`.
+
 ## Development
 
 ```sh
@@ -102,6 +130,27 @@ console.log(subscription.href);
 ```
 
 In the Slack channel, enter `/feed subscribe ` followed by that full URL. Treat a URL containing the shared token as a credential. Stopping the Slack subscription stops its refreshes, and its record expires within 8 days of the last stored refresh. Other readers still polling the same feed keep it subscribed. Cron pre-generates the default language; other languages use the crawl fallback.
+
+### Slack end-to-end check
+
+Install Slack's RSS app, then add the worker feed URL in a test channel. For
+the default validation feed:
+
+```text
+/feed subscribe https://tldrss.yowatari.workers.dev/feed?url=https%3A%2F%2Fnews.ycombinator.com%2Frss
+```
+
+The first poll may return an item-less channel while generation runs in the
+background. Trigger the scheduled endpoint locally, or wait for 08:50 JST;
+the next poll should contain one digest `<item>`. Confirm that its `guid` is
+unchanged on same-day polls, changes on the next JST date, and that the item
+`<link>` opens `/digest/{hash}/{date}?lang=en`. Slack's RSS app stores the last
+item date, so a successful setup posts one message per new digest item. To
+test removal, use `/feed remove` in Slack and verify the corresponding `sub:`
+key disappears after eight days without another crawl.
+
+Slack's official setup requires installing the RSS app and selecting a channel
+for the feed. Validate the URL with the W3C feed validator if Slack rejects it.
 
 The cap uses KV listing and serializes registrations within one isolate. KV is eventually consistent and has no atomic compare-and-set, so simultaneous registrations across isolates can temporarily exceed the cap. Separate `sub:{hash}` keys ensure concurrent registration of different feeds does not overwrite subscriptions. Host restrictions apply to the requested feed hostname; they are not a network firewall for upstream redirects.
 
