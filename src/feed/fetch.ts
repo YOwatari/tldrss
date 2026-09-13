@@ -71,6 +71,9 @@ export async function fetchFeed(url: URL, options: FeedFetcherOptions): Promise<
         } finally {
           clearTimeout(readTimer);
         }
+        if (controller.signal.aborted) {
+          throw new FeedFetchError("Upstream feed timed out", "timeout");
+        }
         const { done, value } = result;
         if (done) break;
         bytes += value.byteLength;

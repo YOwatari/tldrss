@@ -30,25 +30,70 @@ export function generationLockKey(ref: DigestRef): string {
 export async function acquireGenerationLock(
   cache: KVNamespace,
   ref: DigestRef,
+  options: { deadlineAt?: number } = {},
 ): Promise<string | null> {
   const key = generationLockKey(ref);
-  const localToken = crypto.randomUUID();
+  const attemptToken = crypto.randomUUID();
   if (inFlight.has(key)) return null;
-  inFlight.set(key, localToken);
+  inFlight.set(key, attemptToken);
 
-  try {
-    if ((await cache.get(key)) !== null) {
-      if (inFlight.get(key) === localToken) inFlight.delete(key);
-      return null;
+  const work = (async (): Promise<string | null> => {
+    let token: string;
+    try {
+      if ((await cache.get(key)) !== null) {
+        if (inFlight.get(key) === attemptToken) inFlight.delete(key);
+        return null;
+      }
+
+      token = crypto.randomUUID();
+      await cache.put(key, token, { expirationTtl: GENERATION_LOCK_TTL_SECONDS });
+    } catch (error) {
+      if (inFlight.get(key) === attemptToken) inFlight.delete(key);
+      throw error;
     }
 
-    const token = crypto.randomUUID();
-    await cache.put(key, token, { expirationTtl: GENERATION_LOCK_TTL_SECONDS });
+    if (inFlight.get(key) !== attemptToken) {
+      // The caller timed out and another local attempt may now own the guard.
+      // Only remove this token if it is still the value in KV.
+      void deleteTokenIfCurrent(cache, key, token, attemptToken);
+      return null;
+    }
     inFlight.set(key, token);
     return token;
-  } catch (error) {
-    if (inFlight.get(key) === localToken) inFlight.delete(key);
-    throw error;
+  })();
+
+  if (options.deadlineAt === undefined) return work;
+  const remaining = options.deadlineAt - Date.now();
+  if (remaining <= 0) {
+    if (inFlight.get(key) === attemptToken) inFlight.delete(key);
+    void work.catch(() => undefined);
+    throw new Error("Digest generation deadline exceeded during generation lock");
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      if (inFlight.get(key) === attemptToken) inFlight.delete(key);
+      reject(new Error("Digest generation deadline exceeded during generation lock"));
+    }, remaining);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function deleteTokenIfCurrent(
+  cache: KVNamespace,
+  key: string,
+  token: string,
+  attemptToken: string,
+): Promise<void> {
+  try {
+    if (inFlight.has(key) && inFlight.get(key) !== attemptToken) return;
+    if ((await cache.get(key)) === token) await cache.delete(key);
+  } catch {
+    // The lock TTL remains the fallback when late cleanup cannot reach KV.
   }
 }
 

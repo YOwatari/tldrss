@@ -82,20 +82,9 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
 
   if ((await withinDeadline(getDigest(env.DIGEST_CACHE, ref), deadlineAt, "digest lookup")) !== null) return "cached";
 
-  const lockPromise = acquireGenerationLock(env.DIGEST_CACHE, ref);
-  let lockToken: string | null;
-  try {
-    lockToken = await withinDeadline(lockPromise, deadlineAt, "generation lock");
-  } catch (error) {
-    // The KV operation itself cannot be cancelled. If it acquires the lock
-    // after our deadline, release that late token so it cannot strand a feed.
-    cancelGenerationLockAttempt(ref);
-    void lockPromise.then((lateToken) => {
-      if (lateToken) return releaseGenerationLock(env.DIGEST_CACHE, ref, lateToken);
-    }).catch(() => undefined);
-    throw error;
-  }
+  const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref, { deadlineAt });
   if (!lockToken) return "locked";
+  const lockExpiresAt = Date.now() + GENERATION_LOCK_TTL_SECONDS * 1000;
 
   const storage = { late: false, pending: [] as Promise<unknown>[] };
   try {
@@ -119,7 +108,7 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
     if (storage.late || Date.now() >= deadlineAt) {
       // Cleanup must not extend the generation deadline. The lock module keeps
       // its in-isolate guard until the pending KV operation and release finish.
-      void boundedCleanup(cleanup, ref, lockToken);
+      void boundedCleanup(cleanup, ref, lockToken, lockExpiresAt);
     } else {
       try {
         await withinDeadline(cleanup(), deadlineAt, "lock cleanup");
@@ -138,8 +127,9 @@ async function boundedCleanup(
   cleanup: () => Promise<void>,
   ref: DigestRef,
   lockToken: string,
+  lockExpiresAt: number,
 ): Promise<void> {
-  const cleanupDeadline = Date.now() + GENERATION_LOCK_TTL_SECONDS * 1000 - 1_000;
+  const cleanupDeadline = lockExpiresAt - 1_000;
   try {
     await withinDeadline(cleanup(), cleanupDeadline, "lock cleanup");
   } catch (error) {

@@ -42,7 +42,8 @@ Feed readers time out quickly, so `/feed` never generates a digest inside the re
 When the model cannot be reached, the digest degrades to the day's titles and links instead of disappearing, and that fallback is cached like any other digest — a model outage costs the day its summary rather than causing a retry on every crawl.
 
 Each generation has a 25-second end-to-end deadline (configurable with
-`GENERATION_TIMEOUT_MS`). The upstream feed gets at most 5 seconds by default
+`GENERATION_TIMEOUT_MS`, capped at four minutes below the five-minute
+generation-lock TTL). The upstream feed gets at most 5 seconds by default
 (`FEED_TIMEOUT_MS`), including waiting for headers and every body chunk, and
 `MAX_FEED_BYTES` limits the received body to 1,000,000 bytes even when the
 server omits `Content-Length`. The body is streamed and rejected before XML
