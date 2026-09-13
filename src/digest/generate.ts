@@ -96,16 +96,36 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
   }
   if (!lockToken) return "locked";
 
+  const storage = { late: false, pending: [] as Promise<unknown>[] };
   try {
     const digest = await buildDigest(env, summarizer, ref, feedUrl, now, deadlineAt);
     if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-    await storeDigest(env, digest, links, deadlineAt);
+    await storeDigest(env, digest, links, deadlineAt, storage);
   } finally {
-    try {
-      await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
-    } catch (error) {
-      const kind = error instanceof Error ? error.name : typeof error;
-      console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
+    let releasePromise: Promise<void> | undefined;
+    const release = () => {
+      releasePromise ??= releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
+      return releasePromise;
+    };
+    const cleanup = async () => {
+      // A timed-out write may still publish. Keep the lock until it settles so
+      // a newer generation cannot race it and leave page/XML from different
+      // generations in KV.
+      if (storage.late) await Promise.allSettled(storage.pending);
+      await release();
+    };
+
+    if (storage.late || Date.now() >= deadlineAt) {
+      // Cleanup must not extend the generation deadline. The lock module keeps
+      // its in-isolate guard until the pending KV operation and release finish.
+      void cleanup().catch((error) => logReleaseFailure(ref, error));
+    } else {
+      try {
+        await withinDeadline(cleanup(), deadlineAt, "lock cleanup");
+      } catch (error) {
+        void releasePromise?.catch((releaseError) => logReleaseFailure(ref, releaseError));
+        if (!releasePromise) logReleaseFailure(ref, error);
+      }
     }
   }
 
@@ -128,16 +148,16 @@ async function summarizeOrList(
   feedTitle: string,
   language: DigestLanguage,
   period: DigestPeriod = "daily",
-  deadlineAt?: number,
+  deadlineAt: number,
 ): Promise<string> {
   try {
-    const summary = await summarizer.summarize({
+    const summary = await withinDeadline(summarizer.summarize({
       feedTitle,
       entries: selection.entries,
       availableCount: selection.availableCount,
       language,
       period,
-    }, { deadlineAt });
+    }, { deadlineAt }), deadlineAt, "summarization");
 
     // Reference markers are numbered against the list the prompt used.
     const html = renderDigestHtml(summary, selection.entries, language);
@@ -167,7 +187,13 @@ async function summarizeOrList(
  * The page is written before the xml. Both land in the same KV namespace, so
  * a reader that sees the item already finds the page behind its link.
  */
-async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlineAt: number): Promise<void> {
+async function storeDigest(
+  env: Env,
+  digest: Digest,
+  links: DigestLinks,
+  deadlineAt: number,
+  storage: { late: boolean; pending: Promise<unknown>[] },
+): Promise<void> {
   const ref: DigestRef = {
     hash: digest.hash,
     date: digest.date,
@@ -177,7 +203,7 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlin
 
   if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
     if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-    await withinDeadline(putDigest(
+    await writeWithDeadline(putDigest(
       env.DIGEST_CACHE,
       ref,
       buildEmptyChannelXml({
@@ -186,19 +212,40 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlin
         period: digest.period,
         links,
       }),
-    ), deadlineAt, "empty digest storage");
+    ), deadlineAt, "empty digest storage", storage);
     if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
     return;
   }
 
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-  await withinDeadline(putDigestPage(env.DIGEST_CACHE, ref, {
+  await writeWithDeadline(putDigestPage(env.DIGEST_CACHE, ref, {
     feedTitle: digest.feedTitle,
     html: digest.html,
-  }), deadlineAt, "digest page storage");
+  }), deadlineAt, "digest page storage", storage);
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-  await withinDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links })), deadlineAt, "digest storage");
+  await writeWithDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links })), deadlineAt, "digest storage", storage);
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
+}
+
+async function writeWithDeadline<T>(
+  work: Promise<T>,
+  deadlineAt: number,
+  stage: string,
+  storage: { late: boolean; pending: Promise<unknown>[] },
+): Promise<T> {
+  const settled = work.then(() => undefined, () => undefined);
+  storage.pending.push(settled);
+  try {
+    return await withinDeadline(work, deadlineAt, stage);
+  } catch (error) {
+    storage.late = Date.now() >= deadlineAt || (error instanceof Error && error.message.includes("deadline"));
+    throw error;
+  }
+}
+
+function logReleaseFailure(ref: DigestRef, error: unknown): void {
+  const kind = error instanceof Error ? error.name : typeof error;
+  console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
 }
 
 /**

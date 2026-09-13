@@ -118,4 +118,23 @@ describe("handleFeed (summarizer injection)", () => {
     await vi.advanceTimersByTimeAsync(11);
     await background;
   });
+
+  it("enforces the generation deadline even when a custom summarizer ignores it", async () => {
+    vi.useFakeTimers();
+    stubFeedFetch(feedXml(new Date(Date.now() - 60 * 60 * 1000).toUTCString()));
+    const summarizer: Summarizer = { summarize: async () => new Promise<string>(() => {}) };
+    const ctx = createExecutionContext();
+    const response = await handleFeed(
+      new Request(WORKER_URL),
+      { ...bindings, GENERATION_TIMEOUT_MS: 100 } as Env,
+      ctx,
+      summarizer,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<item>");
+    const background = waitOnExecutionContext(ctx);
+    await vi.advanceTimersByTimeAsync(101);
+    await background;
+  });
 });
