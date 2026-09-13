@@ -35,6 +35,9 @@ MAX_ENTRIES = "30"
 # Publish a digest saying so on a day the feed published nothing. Off by
 # default: Slack posts one message per item, and a quiet feed needs no message.
 POST_NO_UPDATES = "false"
+FEED_TIMEOUT_MS = "5000"
+MAX_FEED_BYTES = "1000000"
+GENERATION_TIMEOUT_MS = "25000"
 # The address readers reach this worker at. The scheduled run has no request to
 # read an origin off, and every link it stores has to be absolute, so a run
 # without this var generates nothing. Set it to the deployed hostname

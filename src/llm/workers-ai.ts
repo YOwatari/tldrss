@@ -25,6 +25,9 @@ export const AI_ATTEMPT_BUDGET_MS = 20_000;
  */
 export const AI_TIMEOUT_MS = AI_ATTEMPT_BUDGET_MS / MAX_ATTEMPTS;
 
+/** Time reserved for the page and XML KV writes after model inference. */
+export const STORAGE_BUDGET_MS = 2_000;
+
 function extractResponseText(result: unknown): string {
   if (typeof result === "object" && result !== null && "response" in result) {
     const { response } = result as { response?: unknown };
@@ -59,7 +62,7 @@ async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
 export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): Summarizer {
   const model = (params.model ?? DEFAULT_AI_MODEL) as keyof AiModels;
 
-  async function attempt(input: DigestInput): Promise<string> {
+  async function attempt(input: DigestInput, timeoutMs: number): Promise<string> {
     const result = await withTimeout(
       params.ai.run(model, {
         messages: [
@@ -68,19 +71,24 @@ export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): S
         ],
         max_tokens: MAX_TOKENS,
       }),
-      AI_TIMEOUT_MS,
+      timeoutMs,
     );
 
     return extractResponseText(result);
   }
 
   return {
-    async summarize(input: DigestInput): Promise<string> {
+    async summarize(input: DigestInput, options = {}): Promise<string> {
       let lastError: unknown = new Error("Workers AI was never called");
 
       for (let tries = 0; tries < MAX_ATTEMPTS; tries++) {
         try {
-          return await attempt(input);
+          const remaining = options.deadlineAt === undefined
+            ? AI_TIMEOUT_MS * (MAX_ATTEMPTS - tries)
+            : options.deadlineAt - Date.now() - STORAGE_BUDGET_MS;
+          const timeoutMs = Math.floor(remaining / (MAX_ATTEMPTS - tries));
+          if (timeoutMs <= 0) throw new Error("Generation deadline exceeded before Workers AI");
+          return await attempt(input, Math.min(AI_TIMEOUT_MS, timeoutMs));
         } catch (error) {
           lastError = error;
         }

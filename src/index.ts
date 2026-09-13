@@ -71,10 +71,10 @@ export default {
   async scheduled(
     controller: ScheduledController,
     env: Env,
-    _ctx: ExecutionContext,
+    ctx: ExecutionContext,
   ): Promise<void> {
     const summarizer = createWorkersAiSummarizer({ ai: env.AI, model: env.AI_MODEL });
 
-    await handleScheduled(controller, env, summarizer);
+    await handleScheduled(controller, env, summarizer, (promise) => ctx.waitUntil(promise));
   },
 } satisfies ExportedHandler<Env>;

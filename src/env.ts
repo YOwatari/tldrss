@@ -28,7 +28,39 @@ export type Env = {
    * hence a var rather than a default.
    */
   PUBLIC_ORIGIN?: string;
+  /** Maximum time spent fetching one upstream feed, including its body. */
+  FEED_TIMEOUT_MS?: string | number;
+  /** Maximum received body bytes accepted from one upstream feed. */
+  MAX_FEED_BYTES?: string | number;
+  /** End-to-end budget for one digest generation. */
+  GENERATION_TIMEOUT_MS?: string | number;
 };
+
+export const DEFAULT_FEED_TIMEOUT_MS = 5_000;
+export const DEFAULT_MAX_FEED_BYTES = 1_000_000;
+export const DEFAULT_GENERATION_TIMEOUT_MS = 25_000;
+/** Keep the generation deadline inside the 30-second HTTP waitUntil window. */
+export const GENERATION_TIMEOUT_MS_CEILING = 25_000;
+
+function positiveInteger(value: string | number | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function feedTimeoutMsOf(env: Env): number {
+  return positiveInteger(env.FEED_TIMEOUT_MS, DEFAULT_FEED_TIMEOUT_MS);
+}
+
+export function maxFeedBytesOf(env: Env): number {
+  return positiveInteger(env.MAX_FEED_BYTES, DEFAULT_MAX_FEED_BYTES);
+}
+
+export function generationTimeoutMsOf(env: Env): number {
+  return Math.min(
+    positiveInteger(env.GENERATION_TIMEOUT_MS, DEFAULT_GENERATION_TIMEOUT_MS),
+    GENERATION_TIMEOUT_MS_CEILING,
+  );
+}
 
 /**
  * Upper bound on `MAX_ENTRIES`. The prompt has to stay inside the model's

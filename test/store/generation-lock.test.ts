@@ -42,7 +42,7 @@ describe("acquireGenerationLock", () => {
   });
 
   it("refuses a second holder while the first still holds it", async () => {
-    await acquire();
+    const token = await acquire();
 
     await expect(acquire()).resolves.toBeNull();
   });
@@ -97,19 +97,21 @@ describe("releaseGenerationLock", () => {
   });
 
   it("clears the guard even when KV fails, so the feed is not stuck", async () => {
-    await acquire();
+    const token = await acquire();
     const failingCache = {
       get: async () => {
         throw new Error("KV unavailable");
       },
     } as unknown as KVNamespace;
 
-    await expect(releaseGenerationLock(failingCache, REF, "any")).rejects.toThrow();
+    await expect(releaseGenerationLock(failingCache, REF, token ?? "")).rejects.toThrow();
 
     // Read against a cache that reports the key as free: what must not linger
     // is the in-isolate guard.
     const freeCache = { get: async () => null, put: async () => {} } as unknown as KVNamespace;
-    await expect(acquireGenerationLock(freeCache, REF)).resolves.toEqual(expect.any(String));
+    const freeToken = await acquireGenerationLock(freeCache, REF);
+    expect(freeToken).toEqual(expect.any(String));
+    await releaseGenerationLock(freeCache, REF, freeToken ?? "");
   });
 
   it("leaves a lock held by another isolate in place", async () => {

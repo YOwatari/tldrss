@@ -14,14 +14,15 @@ import type { DigestLanguage } from "./language";
 import { periodDays, type DigestPeriod } from "./period";
 import { noRecentEntriesText } from "./text";
 import type { Digest, DigestLinks } from "./types";
-import { type Env, maxEntriesOf, shouldPostNoUpdates } from "../env";
+import { feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
+import { fetchFeed } from "../feed/fetch";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest, putDigest } from "../store/digest-cache";
 import { putDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
-import { acquireGenerationLock, releaseGenerationLock } from "../store/generation-lock";
+import { acquireGenerationLock, cancelGenerationLockAttempt, GENERATION_LOCK_TTL_SECONDS, releaseGenerationLock } from "../store/generation-lock";
 
 /** What a generation did, for a caller that reports on it. */
 export type GenerationOutcome =
@@ -39,6 +40,8 @@ export type GenerateDigestParams = {
   ref: DigestRef;
   feedUrl: URL;
   links: DigestLinks;
+  /** Keeps late KV cleanup alive after the generation deadline. */
+  trackCleanup?: (promise: Promise<void>) => void;
   /**
    * The instant the day's entries are selected against. The cron run passes
    * its scheduled time, so a run that starts late still covers the window its
@@ -76,26 +79,71 @@ export function digestLinksOf(origin: string, ref: DigestRef): DigestLinks {
  * digest means differs per caller, and both of them have somewhere to put it.
  */
 export async function generateDigest(params: GenerateDigestParams): Promise<GenerationOutcome> {
-  const { env, summarizer, ref, feedUrl, links, now } = params;
+  const { env, summarizer, ref, feedUrl, links, now, trackCleanup } = params;
+  const deadlineAt = Date.now() + generationTimeoutMsOf(env);
 
-  if ((await getDigest(env.DIGEST_CACHE, ref)) !== null) return "cached";
+  if ((await withinDeadline(getDigest(env.DIGEST_CACHE, ref), deadlineAt, "digest lookup")) !== null) return "cached";
 
-  const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref);
+  const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref, { deadlineAt });
   if (!lockToken) return "locked";
+  const lockExpiresAt = Date.now() + GENERATION_LOCK_TTL_SECONDS * 1000;
 
+  const storage = { late: false, pending: [] as Promise<unknown>[] };
   try {
-    const digest = await buildDigest(env, summarizer, ref, feedUrl, now);
-    await storeDigest(env, digest, links);
+    const digest = await buildDigest(env, summarizer, ref, feedUrl, now, deadlineAt);
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
+    await storeDigest(env, digest, links, deadlineAt, storage);
   } finally {
-    try {
-      await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
-    } catch (error) {
-      const kind = error instanceof Error ? error.name : typeof error;
-      console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
+    let releasePromise: Promise<void> | undefined;
+    const release = () => {
+      releasePromise ??= releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
+      return releasePromise;
+    };
+    const cleanup = async () => {
+      // A timed-out write may still publish. Keep the lock until it settles so
+      // a newer generation cannot race it and leave page/XML from different
+      // generations in KV.
+      if (storage.late) await Promise.allSettled(storage.pending);
+      await release();
+    };
+
+    if (storage.late || Date.now() >= deadlineAt) {
+      // Cleanup must not extend the generation deadline. The lock module keeps
+      // its in-isolate guard until the pending KV operation and release finish.
+      const cleanupPromise = boundedCleanup(cleanup, ref, lockToken, lockExpiresAt);
+      if (trackCleanup) trackCleanup(cleanupPromise);
+      else void cleanupPromise;
+    } else {
+      try {
+        await withinDeadline(cleanup(), deadlineAt, "lock cleanup");
+      } catch (error) {
+        cancelGenerationLockAttempt(ref, lockToken);
+        void releasePromise?.catch((releaseError) => logReleaseFailure(ref, releaseError));
+        if (!releasePromise) logReleaseFailure(ref, error);
+      }
     }
   }
 
   return "generated";
+}
+
+async function boundedCleanup(
+  cleanup: () => Promise<void>,
+  ref: DigestRef,
+  lockToken: string,
+  lockExpiresAt: number,
+): Promise<void> {
+  const cleanupDeadline = lockExpiresAt - 1_000;
+  try {
+    await withinDeadline(cleanup(), cleanupDeadline, "lock cleanup");
+  } catch (error) {
+    // Do not leave the module-level guard set forever if a late KV write or
+    // release never settles. The KV lock remains protected until its TTL and
+    // release checks the token before deleting, so a late delete cannot remove
+    // a newer local owner's lock.
+    cancelGenerationLockAttempt(ref, lockToken);
+    logReleaseFailure(ref, error);
+  }
 }
 
 /**
@@ -114,15 +162,16 @@ async function summarizeOrList(
   feedTitle: string,
   language: DigestLanguage,
   period: DigestPeriod = "daily",
+  deadlineAt: number,
 ): Promise<string> {
   try {
-    const summary = await summarizer.summarize({
+    const summary = await withinDeadline(summarizer.summarize({
       feedTitle,
       entries: selection.entries,
       availableCount: selection.availableCount,
       language,
       period,
-    });
+    }, { deadlineAt }), deadlineAt, "summarization");
 
     // Reference markers are numbered against the list the prompt used.
     const html = renderDigestHtml(summary, selection.entries, language);
@@ -152,7 +201,13 @@ async function summarizeOrList(
  * The page is written before the xml. Both land in the same KV namespace, so
  * a reader that sees the item already finds the page behind its link.
  */
-async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promise<void> {
+async function storeDigest(
+  env: Env,
+  digest: Digest,
+  links: DigestLinks,
+  deadlineAt: number,
+  storage: { late: boolean; pending: Promise<unknown>[] },
+): Promise<void> {
   const ref: DigestRef = {
     hash: digest.hash,
     date: digest.date,
@@ -161,7 +216,8 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
   };
 
   if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
-    await putDigest(
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
+    await writeWithDeadline(putDigest(
       env.DIGEST_CACHE,
       ref,
       buildEmptyChannelXml({
@@ -170,15 +226,63 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
         period: digest.period,
         links,
       }),
-    );
+    ), deadlineAt, "empty digest storage", storage);
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
     return;
   }
 
-  await putDigestPage(env.DIGEST_CACHE, ref, {
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
+  await writeWithDeadline(putDigestPage(env.DIGEST_CACHE, ref, {
     feedTitle: digest.feedTitle,
     html: digest.html,
+  }), deadlineAt, "digest page storage", storage);
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
+  await writeWithDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links })), deadlineAt, "digest storage", storage);
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
+}
+
+async function writeWithDeadline<T>(
+  work: Promise<T>,
+  deadlineAt: number,
+  stage: string,
+  storage: { late: boolean; pending: Promise<unknown>[] },
+): Promise<T> {
+  const settled = work.then(() => undefined, () => undefined);
+  storage.pending.push(settled);
+  try {
+    return await withinDeadline(work, deadlineAt, stage);
+  } catch (error) {
+    storage.late = Date.now() >= deadlineAt || (error instanceof Error && error.message.includes("deadline"));
+    throw error;
+  }
+}
+
+function logReleaseFailure(ref: DigestRef, error: unknown): void {
+  const kind = error instanceof Error ? error.name : typeof error;
+  console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
+}
+
+/**
+ * KV has no abort signal. Stop waiting at the generation deadline while the
+ * underlying operation finishes in the background; callers must treat a late
+ * successful write as untrusted and check the deadline after it.
+ */
+async function withinDeadline<T>(work: Promise<T>, deadlineAt: number, stage: string): Promise<T> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) {
+    void work.catch(() => undefined);
+    throw new Error(`Digest generation deadline exceeded during ${stage}`);
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Digest generation deadline exceeded during ${stage}`)), remaining);
   });
-  await putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links }));
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function buildDigest(
@@ -187,13 +291,13 @@ async function buildDigest(
   ref: DigestRef,
   feedUrl: URL,
   now: Date | undefined,
+  deadlineAt: number,
 ): Promise<Digest> {
-  const feedResponse = await fetch(feedUrl.toString());
-  if (!feedResponse.ok) {
-    throw new Error(`Feed responded with ${feedResponse.status}`);
-  }
-
-  const feed = parseFeed(await feedResponse.text());
+  const feed = parseFeed(await fetchFeed(feedUrl, {
+    timeoutMs: feedTimeoutMsOf(env),
+    maxBytes: maxFeedBytesOf(env),
+    deadlineAt,
+  }));
   const feedTitle = feed.title ?? feedUrl.host;
   const selection = selectRecentEntries(feed.items, {
     now: ref.period === "weekly" ? new Date(`${ref.date}T00:00:00+09:00`) : now,
@@ -205,7 +309,7 @@ async function buildDigest(
   const html =
     selection.entries.length === 0
       ? renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language)
-      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period);
+      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
   return { ...ref, feedTitle, html, entries: selection.entries };
 }

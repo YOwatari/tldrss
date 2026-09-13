@@ -118,7 +118,7 @@ export async function handleFeed(
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
-  ctx.waitUntil(generateInBackground(env, summarizer, ref, feedUrl, links));
+  ctx.waitUntil(generateInBackground(env, summarizer, ref, feedUrl, links, (promise) => ctx.waitUntil(promise)));
 
   // Yesterday's digest keeps the subscription populated when today's cron run
   // (or a previous background generation) has not produced one yet.
@@ -145,9 +145,10 @@ async function generateInBackground(
   ref: DigestRef,
   feedUrl: URL,
   links: DigestLinks,
+  trackCleanup: (promise: Promise<void>) => void,
 ): Promise<void> {
   try {
-    await generateDigest({ env, summarizer, ref, feedUrl, links });
+    await generateDigest({ env, summarizer, ref, feedUrl, links, trackCleanup });
   } catch (error) {
     // Private feed URLs carry credentials in the query string, so only the
     // origin and the error class are logged.

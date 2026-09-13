@@ -1,4 +1,4 @@
-import { createExecutionContext, env as providedEnv, waitOnExecutionContext } from "cloudflare:test";
+import { createExecutionContext, env as providedEnv, reset, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../../src/env";
 import { handleFeed } from "../../src/handlers/feed";
@@ -45,8 +45,10 @@ async function generate(summarizer: Summarizer, env = bindings): Promise<void> {
   await waitOnExecutionContext(ctx);
 }
 
-afterEach(() => {
+afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+  await reset();
 });
 
 describe("handleFeed (summarizer injection)", () => {
@@ -83,5 +85,56 @@ describe("handleFeed (summarizer injection)", () => {
     await generate(summarizer);
 
     expect(summarizer.calls).toEqual([]);
+  });
+
+  it("does not parse or summarize an upstream body over the streamed limit", async () => {
+    stubFeedFetch(`<rss><channel>${"<item>too large</item>".repeat(20)}</channel></rss>`);
+    const summarizer = fakeSummarizer();
+    const env = { ...bindings, MAX_FEED_BYTES: 32 };
+
+    await generate(summarizer, env);
+
+    expect(summarizer.calls).toEqual([]);
+  });
+
+  it("serves an empty RSS channel immediately when generation times out", async () => {
+    vi.useFakeTimers();
+    const body = new ReadableStream<Uint8Array>({
+      start() {},
+      cancel() {},
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body)));
+    const ctx = createExecutionContext();
+    const response = await handleFeed(
+      new Request(WORKER_URL),
+      { ...bindings, FEED_TIMEOUT_MS: 10, GENERATION_TIMEOUT_MS: 100 } as Env,
+      ctx,
+      fakeSummarizer(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<item>");
+    const background = waitOnExecutionContext(ctx);
+    await vi.advanceTimersByTimeAsync(11);
+    await background;
+  });
+
+  it("enforces the generation deadline even when a custom summarizer ignores it", async () => {
+    vi.useFakeTimers();
+    stubFeedFetch(feedXml(new Date(Date.now() - 60 * 60 * 1000).toUTCString()));
+    const summarizer: Summarizer = { summarize: async () => new Promise<string>(() => {}) };
+    const ctx = createExecutionContext();
+    const response = await handleFeed(
+      new Request(WORKER_URL),
+      { ...bindings, GENERATION_TIMEOUT_MS: 100 } as Env,
+      ctx,
+      summarizer,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<item>");
+    const background = waitOnExecutionContext(ctx);
+    await vi.advanceTimersByTimeAsync(101);
+    await background;
   });
 });

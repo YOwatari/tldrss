@@ -193,6 +193,22 @@ describe("handleScheduled", () => {
     await expect(digestOf(healthy)).resolves.toContain("<rss");
   });
 
+  it("does not let a feed that stops after headers block the other Cron feeds", async () => {
+    const slow = "https://slow.example/rss.xml";
+    const healthy = "https://healthy.example/rss.xml";
+    await register(slow, healthy);
+    const hangingBody = new ReadableStream<Uint8Array>({ start() {}, cancel() {} });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return url === slow ? new Response(hangingBody) : new Response(feedXml(url));
+    }));
+
+    const summary = await run(envWith({ FEED_TIMEOUT_MS: 20 }), fakeSummarizer());
+
+    expect(summary).toMatchObject({ total: 2, generated: 1, failed: 1 });
+    await expect(digestOf(await sha256Hex(healthy))).resolves.toContain("<rss");
+  });
+
   it("does not regenerate a digest the day already has", async () => {
     const fetched = stubFeedFetch();
     const [hash] = await register("https://a.example/rss.xml");

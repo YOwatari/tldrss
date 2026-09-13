@@ -4,6 +4,7 @@ import type { DigestInput } from "../../src/llm/summarizer";
 import {
   AI_ATTEMPT_BUDGET_MS,
   AI_TIMEOUT_MS,
+  STORAGE_BUDGET_MS,
   DEFAULT_AI_MODEL,
   createWorkersAiSummarizer,
 } from "../../src/llm/workers-ai";
@@ -119,5 +120,29 @@ describe("createWorkersAiSummarizer", () => {
 
     await assertion;
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("reserves storage time and divides a shared deadline across retries", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn().mockReturnValue(new Promise(() => {}));
+    const summarizing = createWorkersAiSummarizer({ ai: { run } as unknown as Ai }).summarize(input, {
+      deadlineAt: Date.now() + 6_000,
+    });
+    const assertion = expect(summarizing).rejects.toThrow(/timed out/);
+
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2_001);
+    await assertion;
+    expect(STORAGE_BUDGET_MS).toBe(2_000);
+  });
+
+  it("does not start an AI attempt after the shared deadline", async () => {
+    const { ai, run } = stubAi({ response: "unused" });
+
+    await expect(createWorkersAiSummarizer({ ai }).summarize(input, {
+      deadlineAt: Date.now() - 1,
+    })).rejects.toThrow(/deadline/);
+    expect(run).not.toHaveBeenCalled();
   });
 });

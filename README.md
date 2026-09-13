@@ -41,6 +41,28 @@ Feed readers time out quickly, so `/feed` never generates a digest inside the re
 
 When the model cannot be reached, the digest degrades to the day's titles and links instead of disappearing, and that fallback is cached like any other digest — a model outage costs the day its summary rather than causing a retry on every crawl.
 
+Each generation has a 25-second end-to-end deadline (configurable with
+`GENERATION_TIMEOUT_MS`, capped at 25 seconds to fit the HTTP `waitUntil`
+window and the Cron execution budget). The upstream feed gets at most 5 seconds by default
+(`FEED_TIMEOUT_MS`), including waiting for headers and every body chunk, and
+`MAX_FEED_BYTES` limits the received body to 1,000,000 bytes even when the
+server omits `Content-Length`. The body is streamed and rejected before XML
+parsing or AI when it exceeds the limit. These defaults leave the Cloudflare
+`waitUntil` 30-second allowance room for KV writes; Cron applies the same
+per-feed budget, so a stalled feed is counted as failed and other feeds run.
+The AI retry calculation reserves 2 seconds of the generation budget for the
+digest page and RSS XML KV writes. KV has no abort signal either, so a stalled
+KV operation is abandoned by the worker once the deadline is reached; a late
+write is not reported as a successful generation.
+
+Workers AI has no abort-signal API. Its timeout abandons waiting for the
+promise, but cannot cancel inference already running at the provider; the
+abandoned call may therefore still consume model resources. At most one retry
+is made, and the shared generation deadline is divided across the remaining
+attempts. Feed timeout/size failures are not retried; a later crawl or Cron
+run can try again, while the HTTP path continues serving the previous digest
+or an empty RSS channel immediately.
+
 Upstream and model failures are logged and answered with 200, never with an error status, so a reader does not show the subscription as broken. A `generating:{...}` key (TTL 5 minutes) makes concurrent requests unlikely to generate the same digest twice; KV has no compare-and-set and is only eventually consistent across isolates, so this reduces duplicate work rather than ruling it out.
 
 ### Scheduled pre-generation
@@ -62,6 +84,9 @@ A cron trigger runs at 08:50 JST (`50 23 * * *` in UTC, the schedule Cloudflare 
 | `MAX_ENTRIES` | var | Entries per digest (default: 30, capped at 100) |
 | `POST_NO_UPDATES` | var | Publish an item on a day with no new entries (default: off; `true` or `1` turns it on) |
 | `PUBLIC_ORIGIN` | var | The address readers reach the worker at, e.g. `https://tldrss.example`. Required by the scheduled run, which has no request to read an origin off; a run without it generates nothing |
+| `FEED_TIMEOUT_MS` | var | Upstream headers/body deadline per generation (default: 5000) |
+| `MAX_FEED_BYTES` | var | Maximum streamed upstream body size in bytes (default: 1000000) |
+| `GENERATION_TIMEOUT_MS` | var | End-to-end feed/AI/storage deadline per digest (default: 25000) |
 
 No API key is needed: Workers AI is billed through the account that owns the worker.
 Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://developers.cloudflare.com/workers-ai/models/).
