@@ -16,6 +16,7 @@ import { noRecentEntriesText } from "./text";
 import type { Digest, DigestLinks } from "./types";
 import { feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
 import { fetchFeed } from "../feed/fetch";
+import { isFeedDestinationAllowed } from "../feed/policy";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
@@ -297,6 +298,7 @@ async function buildDigest(
     timeoutMs: feedTimeoutMsOf(env),
     maxBytes: maxFeedBytesOf(env),
     deadlineAt,
+    isAllowed: (url) => isFeedDestinationAllowed(env, url),
   }));
   const feedTitle = feed.title ?? feedUrl.host;
   const selection = selectRecentEntries(feed.items, {

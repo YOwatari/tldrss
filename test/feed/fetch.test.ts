@@ -7,6 +7,44 @@ afterEach(() => {
 });
 
 describe("fetchFeed", () => {
+  it("validates relative redirects before following them", async () => {
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      fetched.push(url);
+      return url.endsWith("/start")
+        ? new Response(null, { status: 302, headers: { location: "/final" } })
+        : new Response("<rss/>");
+    }));
+
+    await expect(fetchFeed(new URL("https://source.example/start"), {
+      timeoutMs: 1000, maxBytes: 1000, isAllowed: url => url.hostname === "source.example",
+    })).resolves.toBe("<rss/>");
+    expect(fetched).toEqual(["https://source.example/start", "https://source.example/final"]);
+  });
+
+  it("rejects a redirect to a disallowed destination", async () => {
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      fetched.push(String(input));
+      return new Response(null, { status: 302, headers: { location: "https://private.example/feed" } });
+    }));
+
+    await expect(fetchFeed(new URL("https://source.example/feed"), {
+      timeoutMs: 1000, maxBytes: 1000, isAllowed: url => url.hostname === "source.example",
+    })).rejects.toMatchObject({ code: "policy" });
+    expect(fetched).toEqual(["https://source.example/feed"]);
+  });
+
+  it("rejects redirect loops and excessive redirects", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => new Response(null, {
+      status: 302, headers: { location: String(input) },
+    })));
+    await expect(fetchFeed(new URL("https://source.example/feed"), {
+      timeoutMs: 1000, maxBytes: 1000, isAllowed: () => true, maxRedirects: 2,
+    })).rejects.toMatchObject({ code: "redirect" });
+  });
+
   it("times out when the upstream never responds", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
