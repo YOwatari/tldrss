@@ -23,7 +23,6 @@ async function crawl(config: Partial<Env> = {}, token?: string, feed = url) {
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); await reset(); });
 
 it.each([
-  [{ ALLOWED_FEED_HOSTS: "" }, undefined],
   [{ ALLOWED_FEED_HOSTS: "elsewhere.example" }, undefined],
   [{ ALLOWED_FEED_HOSTS: "example" }, undefined],
   [{ FEED_TOKEN: "secret" }, undefined],

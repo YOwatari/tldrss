@@ -154,7 +154,7 @@ Workers AI has no local emulation, so tests inject a stub `AI` binding and `remo
 
 ## Slack subscriptions and access controls
 
-Set `ALLOWED_FEED_HOSTS` in `wrangler.toml` to a comma-separated list of exact feed hostnames, for example `"example.com,feeds.example.org"`, and set `MAX_SUBSCRIPTIONS` (default 20). Host matching ignores case and surrounding spaces; subdomains are not implicitly allowed. These are hostnames, without a scheme, path, or port.
+Any HTTP(S) feed URL is accepted by default. To restrict the service, optionally set `ALLOWED_FEED_HOSTS` in `wrangler.toml` to a comma-separated list of exact feed hostnames, for example `"example.com,feeds.example.org"`. Host matching ignores case and surrounding spaces; subdomains are not implicitly allowed. These are hostnames, without a scheme, path, or port. `MAX_SUBSCRIPTIONS` defaults to 20.
 
 Alternatively, or additionally, set a shared secret:
 
@@ -162,7 +162,7 @@ Alternatively, or additionally, set a shared secret:
 npx wrangler secret put FEED_TOKEN
 ```
 
-For local development put `FEED_TOKEN="your-secret"` in `.dev.vars` (do not commit it). At least one protection is required: with neither hosts nor a token configured, `/feed` returns 403. When both are configured, both must match. Missing or incorrect tokens and disallowed hosts return 403 before subscription writes, cache reads, upstream requests, or AI calls. A new subscription at capacity returns 429; existing subscriptions continue refreshing. Invalid caps fall back to 20.
+For local development put `FEED_TOKEN="your-secret"` in `.dev.vars` (do not commit it). When configured, the token is required; if both a host list and token are configured, both must match. Missing or incorrect tokens and disallowed hosts return 403 before subscription writes, cache reads, upstream requests, or AI calls. A new subscription at capacity returns 429; existing subscriptions continue refreshing. Invalid caps fall back to 20.
 
 Construct the Slack URL with URL encoding, especially when the source feed has its own query parameters. For example, run this JavaScript in a local browser console, replacing the values:
 
