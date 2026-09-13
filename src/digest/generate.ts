@@ -14,7 +14,8 @@ import type { DigestLanguage } from "./language";
 import { periodDays, type DigestPeriod } from "./period";
 import { noRecentEntriesText } from "./text";
 import type { Digest, DigestLinks } from "./types";
-import { type Env, maxEntriesOf, shouldPostNoUpdates } from "../env";
+import { feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
+import { fetchFeed } from "../feed/fetch";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
@@ -84,8 +85,10 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
   if (!lockToken) return "locked";
 
   try {
-    const digest = await buildDigest(env, summarizer, ref, feedUrl, now);
-    await storeDigest(env, digest, links);
+    const deadlineAt = Date.now() + generationTimeoutMsOf(env);
+    const digest = await buildDigest(env, summarizer, ref, feedUrl, now, deadlineAt);
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded");
+    await storeDigest(env, digest, links, deadlineAt);
   } finally {
     try {
       await releaseGenerationLock(env.DIGEST_CACHE, ref, lockToken);
@@ -114,6 +117,7 @@ async function summarizeOrList(
   feedTitle: string,
   language: DigestLanguage,
   period: DigestPeriod = "daily",
+  deadlineAt?: number,
 ): Promise<string> {
   try {
     const summary = await summarizer.summarize({
@@ -122,7 +126,7 @@ async function summarizeOrList(
       availableCount: selection.availableCount,
       language,
       period,
-    });
+    }, { deadlineAt });
 
     // Reference markers are numbered against the list the prompt used.
     const html = renderDigestHtml(summary, selection.entries, language);
@@ -152,7 +156,7 @@ async function summarizeOrList(
  * The page is written before the xml. Both land in the same KV namespace, so
  * a reader that sees the item already finds the page behind its link.
  */
-async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promise<void> {
+async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlineAt: number): Promise<void> {
   const ref: DigestRef = {
     hash: digest.hash,
     date: digest.date,
@@ -161,6 +165,7 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
   };
 
   if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
     await putDigest(
       env.DIGEST_CACHE,
       ref,
@@ -174,10 +179,12 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks): Promis
     return;
   }
 
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
   await putDigestPage(env.DIGEST_CACHE, ref, {
     feedTitle: digest.feedTitle,
     html: digest.html,
   });
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
   await putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links }));
 }
 
@@ -187,13 +194,13 @@ async function buildDigest(
   ref: DigestRef,
   feedUrl: URL,
   now: Date | undefined,
+  deadlineAt: number,
 ): Promise<Digest> {
-  const feedResponse = await fetch(feedUrl.toString());
-  if (!feedResponse.ok) {
-    throw new Error(`Feed responded with ${feedResponse.status}`);
-  }
-
-  const feed = parseFeed(await feedResponse.text());
+  const feed = parseFeed(await fetchFeed(feedUrl, {
+    timeoutMs: feedTimeoutMsOf(env),
+    maxBytes: maxFeedBytesOf(env),
+    deadlineAt,
+  }));
   const feedTitle = feed.title ?? feedUrl.host;
   const selection = selectRecentEntries(feed.items, {
     now: ref.period === "weekly" ? new Date(`${ref.date}T00:00:00+09:00`) : now,
@@ -205,7 +212,7 @@ async function buildDigest(
   const html =
     selection.entries.length === 0
       ? renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language)
-      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period);
+      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
   return { ...ref, feedTitle, html, entries: selection.entries };
 }

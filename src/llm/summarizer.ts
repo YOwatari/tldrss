@@ -29,5 +29,5 @@ export type DigestInput = {
  * placeholder. The caller decides what a reader sees when summarizing fails.
  */
 export interface Summarizer {
-  summarize(input: DigestInput): Promise<string>;
+  summarize(input: DigestInput, options?: { deadlineAt?: number }): Promise<string>;
 }

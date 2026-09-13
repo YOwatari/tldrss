@@ -84,4 +84,14 @@ describe("handleFeed (summarizer injection)", () => {
 
     expect(summarizer.calls).toEqual([]);
   });
+
+  it("does not parse or summarize an upstream body over the streamed limit", async () => {
+    stubFeedFetch(`<rss><channel>${"<item>too large</item>".repeat(20)}</channel></rss>`);
+    const summarizer = fakeSummarizer();
+    const env = { ...bindings, MAX_FEED_BYTES: 32 };
+
+    await generate(summarizer, env);
+
+    expect(summarizer.calls).toEqual([]);
+  });
 });
