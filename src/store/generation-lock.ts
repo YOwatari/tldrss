@@ -54,8 +54,9 @@ export async function acquireGenerationLock(
 
     if (inFlight.get(key) !== attemptToken) {
       // The caller timed out and another local attempt may now own the guard.
-      // Only remove this token if it is still the value in KV.
-      void deleteTokenIfCurrent(cache, key, token, attemptToken);
+      // Do not touch KV here: without compare-and-delete, a late read could
+      // observe this token and delete a newer owner's lock. The lock TTL is
+      // the safe cleanup path for an acquisition that completed too late.
       return null;
     }
     inFlight.set(key, token);
@@ -80,20 +81,6 @@ export async function acquireGenerationLock(
     return await Promise.race([work, timeout]);
   } finally {
     clearTimeout(timer);
-  }
-}
-
-async function deleteTokenIfCurrent(
-  cache: KVNamespace,
-  key: string,
-  token: string,
-  attemptToken: string,
-): Promise<void> {
-  try {
-    if (inFlight.has(key) && inFlight.get(key) !== attemptToken) return;
-    if ((await cache.get(key)) === token) await cache.delete(key);
-  } catch {
-    // The lock TTL remains the fallback when late cleanup cannot reach KV.
   }
 }
 
@@ -140,7 +127,7 @@ export async function releaseGenerationLock(
   } catch (error) {
     // A failed KV read/delete cannot establish ownership. Clear the local
     // guard so a transient KV outage cannot permanently block this isolate.
-    inFlight.delete(key);
+    if (ownsLocalGuard && inFlight.get(key) === token) inFlight.delete(key);
     throw error;
   } finally {
     if (ownsLocalGuard) inFlight.delete(key);
