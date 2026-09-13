@@ -75,7 +75,10 @@ export async function fetchFeed(url: URL, options: FeedFetcherOptions): Promise<
         if (done) break;
         bytes += value.byteLength;
         if (bytes > options.maxBytes) {
-          await reader.cancel("feed too large");
+          // Cancellation is best effort. The size error must be observable
+          // immediately even if an unusual underlying stream never settles
+          // its cancel promise.
+          void reader.cancel("feed too large").catch(() => undefined);
           throw new FeedFetchError(`Upstream feed exceeded ${options.maxBytes} bytes`, "too_large");
         }
         chunks.push(decoder.decode(value, { stream: true }));

@@ -49,6 +49,10 @@ server omits `Content-Length`. The body is streamed and rejected before XML
 parsing or AI when it exceeds the limit. These defaults leave the Cloudflare
 `waitUntil` 30-second allowance room for KV writes; Cron applies the same
 per-feed budget, so a stalled feed is counted as failed and other feeds run.
+The AI retry calculation reserves 2 seconds of the generation budget for the
+digest page and RSS XML KV writes. KV has no abort signal either, so a stalled
+KV operation is abandoned by the worker once the deadline is reached; a late
+write is not reported as a successful generation.
 
 Workers AI has no abort-signal API. Its timeout abandons waiting for the
 promise, but cannot cancel inference already running at the provider; the

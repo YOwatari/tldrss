@@ -30,7 +30,7 @@ export type Env = {
   PUBLIC_ORIGIN?: string;
   /** Maximum time spent fetching one upstream feed, including its body. */
   FEED_TIMEOUT_MS?: string | number;
-  /** Maximum decoded UTF-8 bytes accepted from one upstream feed. */
+  /** Maximum received body bytes accepted from one upstream feed. */
   MAX_FEED_BYTES?: string | number;
   /** End-to-end budget for one digest generation. */
   GENERATION_TIMEOUT_MS?: string | number;

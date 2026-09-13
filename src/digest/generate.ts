@@ -78,16 +78,27 @@ export function digestLinksOf(origin: string, ref: DigestRef): DigestLinks {
  */
 export async function generateDigest(params: GenerateDigestParams): Promise<GenerationOutcome> {
   const { env, summarizer, ref, feedUrl, links, now } = params;
+  const deadlineAt = Date.now() + generationTimeoutMsOf(env);
 
-  if ((await getDigest(env.DIGEST_CACHE, ref)) !== null) return "cached";
+  if ((await withinDeadline(getDigest(env.DIGEST_CACHE, ref), deadlineAt, "digest lookup")) !== null) return "cached";
 
-  const lockToken = await acquireGenerationLock(env.DIGEST_CACHE, ref);
+  const lockPromise = acquireGenerationLock(env.DIGEST_CACHE, ref);
+  let lockToken: string | null;
+  try {
+    lockToken = await withinDeadline(lockPromise, deadlineAt, "generation lock");
+  } catch (error) {
+    // The KV operation itself cannot be cancelled. If it acquires the lock
+    // after our deadline, release that late token so it cannot strand a feed.
+    void lockPromise.then((lateToken) => {
+      if (lateToken) return releaseGenerationLock(env.DIGEST_CACHE, ref, lateToken);
+    }).catch(() => undefined);
+    throw error;
+  }
   if (!lockToken) return "locked";
 
   try {
-    const deadlineAt = Date.now() + generationTimeoutMsOf(env);
     const digest = await buildDigest(env, summarizer, ref, feedUrl, now, deadlineAt);
-    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded");
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
     await storeDigest(env, digest, links, deadlineAt);
   } finally {
     try {
@@ -166,7 +177,7 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlin
 
   if (digest.entries.length === 0 && !shouldPostNoUpdates(env)) {
     if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-    await putDigest(
+    await withinDeadline(putDigest(
       env.DIGEST_CACHE,
       ref,
       buildEmptyChannelXml({
@@ -175,17 +186,39 @@ async function storeDigest(env: Env, digest: Digest, links: DigestLinks, deadlin
         period: digest.period,
         links,
       }),
-    );
+    ), deadlineAt, "empty digest storage");
+    if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
     return;
   }
 
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-  await putDigestPage(env.DIGEST_CACHE, ref, {
+  await withinDeadline(putDigestPage(env.DIGEST_CACHE, ref, {
     feedTitle: digest.feedTitle,
     html: digest.html,
-  });
+  }), deadlineAt, "digest page storage");
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-  await putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links }));
+  await withinDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links })), deadlineAt, "digest storage");
+  if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
+}
+
+/**
+ * KV has no abort signal. Stop waiting at the generation deadline while the
+ * underlying operation finishes in the background; callers must treat a late
+ * successful write as untrusted and check the deadline after it.
+ */
+async function withinDeadline<T>(work: Promise<T>, deadlineAt: number, stage: string): Promise<T> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new Error(`Digest generation deadline exceeded during ${stage}`);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Digest generation deadline exceeded during ${stage}`)), remaining);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function buildDigest(

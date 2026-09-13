@@ -25,6 +25,9 @@ export const AI_ATTEMPT_BUDGET_MS = 20_000;
  */
 export const AI_TIMEOUT_MS = AI_ATTEMPT_BUDGET_MS / MAX_ATTEMPTS;
 
+/** Time reserved for the page and XML KV writes after model inference. */
+export const STORAGE_BUDGET_MS = 2_000;
+
 function extractResponseText(result: unknown): string {
   if (typeof result === "object" && result !== null && "response" in result) {
     const { response } = result as { response?: unknown };
@@ -82,7 +85,7 @@ export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): S
         try {
           const remaining = options.deadlineAt === undefined
             ? AI_TIMEOUT_MS * (MAX_ATTEMPTS - tries)
-            : options.deadlineAt - Date.now();
+            : options.deadlineAt - Date.now() - STORAGE_BUDGET_MS;
           const timeoutMs = Math.floor(remaining / (MAX_ATTEMPTS - tries));
           if (timeoutMs <= 0) throw new Error("Generation deadline exceeded before Workers AI");
           return await attempt(input, Math.min(AI_TIMEOUT_MS, timeoutMs));
