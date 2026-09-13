@@ -39,6 +39,8 @@ export type Env = {
 export const DEFAULT_FEED_TIMEOUT_MS = 5_000;
 export const DEFAULT_MAX_FEED_BYTES = 1_000_000;
 export const DEFAULT_GENERATION_TIMEOUT_MS = 25_000;
+/** Keep the generation deadline below the five-minute generation-lock TTL. */
+export const GENERATION_TIMEOUT_MS_CEILING = 4 * 60 * 1000;
 
 function positiveInteger(value: string | number | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -54,7 +56,10 @@ export function maxFeedBytesOf(env: Env): number {
 }
 
 export function generationTimeoutMsOf(env: Env): number {
-  return positiveInteger(env.GENERATION_TIMEOUT_MS, DEFAULT_GENERATION_TIMEOUT_MS);
+  return Math.min(
+    positiveInteger(env.GENERATION_TIMEOUT_MS, DEFAULT_GENERATION_TIMEOUT_MS),
+    GENERATION_TIMEOUT_MS_CEILING,
+  );
 }
 
 /**

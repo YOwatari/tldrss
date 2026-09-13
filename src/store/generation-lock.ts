@@ -12,7 +12,7 @@ export const GENERATION_LOCK_TTL_SECONDS = 5 * 60;
  * requests handled together would both read the key as free; this set closes
  * that window synchronously before the first await.
  */
-const inFlight = new Set<string>();
+const inFlight = new Map<string, string>();
 
 export function generationLockKey(ref: DigestRef): string {
   return `generating:${ref.hash}:${ref.date}:${ref.language}${periodSuffix(ref.period)}`;
@@ -32,22 +32,33 @@ export async function acquireGenerationLock(
   ref: DigestRef,
 ): Promise<string | null> {
   const key = generationLockKey(ref);
+  const localToken = crypto.randomUUID();
   if (inFlight.has(key)) return null;
-  inFlight.add(key);
+  inFlight.set(key, localToken);
 
   try {
     if ((await cache.get(key)) !== null) {
-      inFlight.delete(key);
+      if (inFlight.get(key) === localToken) inFlight.delete(key);
       return null;
     }
 
     const token = crypto.randomUUID();
     await cache.put(key, token, { expirationTtl: GENERATION_LOCK_TTL_SECONDS });
+    inFlight.set(key, token);
     return token;
   } catch (error) {
-    inFlight.delete(key);
+    if (inFlight.get(key) === localToken) inFlight.delete(key);
     throw error;
   }
+}
+
+/**
+ * Drops only this isolate's acquisition guard. The KV lock is left intact;
+ * an acquisition that completes later is responsible for releasing its token.
+ */
+export function cancelGenerationLockAttempt(ref: DigestRef, expectedToken?: string): void {
+  const key = generationLockKey(ref);
+  if (expectedToken === undefined || inFlight.get(key) === expectedToken) inFlight.delete(key);
 }
 
 /**
@@ -67,10 +78,26 @@ export async function releaseGenerationLock(
 ): Promise<void> {
   const key = generationLockKey(ref);
 
+  const ownsLocalGuard = inFlight.get(key) === token;
   try {
-    if ((await cache.get(key)) !== token) return;
+    const currentToken = await cache.get(key);
+    if (currentToken === null) {
+      // The KV entry may have expired or been removed by test cleanup. No
+      // remote owner exists in that case, so clear a stale local guard too.
+      inFlight.delete(key);
+      return;
+    }
+    if (currentToken !== token) return;
+    // A caller from another isolate may observe the token, but only this
+    // isolate's owner may issue the delete or clear its local guard.
+    if (!ownsLocalGuard) return;
     await cache.delete(key);
-  } finally {
+  } catch (error) {
+    // A failed KV read/delete cannot establish ownership. Clear the local
+    // guard so a transient KV outage cannot permanently block this isolate.
     inFlight.delete(key);
+    throw error;
+  } finally {
+    if (ownsLocalGuard) inFlight.delete(key);
   }
 }

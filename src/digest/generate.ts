@@ -22,7 +22,7 @@ import type { Summarizer } from "../llm/summarizer";
 import { getDigest, putDigest } from "../store/digest-cache";
 import { putDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
-import { acquireGenerationLock, releaseGenerationLock } from "../store/generation-lock";
+import { acquireGenerationLock, cancelGenerationLockAttempt, GENERATION_LOCK_TTL_SECONDS, releaseGenerationLock } from "../store/generation-lock";
 
 /** What a generation did, for a caller that reports on it. */
 export type GenerationOutcome =
@@ -89,6 +89,7 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
   } catch (error) {
     // The KV operation itself cannot be cancelled. If it acquires the lock
     // after our deadline, release that late token so it cannot strand a feed.
+    cancelGenerationLockAttempt(ref);
     void lockPromise.then((lateToken) => {
       if (lateToken) return releaseGenerationLock(env.DIGEST_CACHE, ref, lateToken);
     }).catch(() => undefined);
@@ -118,11 +119,12 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
     if (storage.late || Date.now() >= deadlineAt) {
       // Cleanup must not extend the generation deadline. The lock module keeps
       // its in-isolate guard until the pending KV operation and release finish.
-      void cleanup().catch((error) => logReleaseFailure(ref, error));
+      void boundedCleanup(cleanup, ref, lockToken);
     } else {
       try {
         await withinDeadline(cleanup(), deadlineAt, "lock cleanup");
       } catch (error) {
+        cancelGenerationLockAttempt(ref, lockToken);
         void releasePromise?.catch((releaseError) => logReleaseFailure(ref, releaseError));
         if (!releasePromise) logReleaseFailure(ref, error);
       }
@@ -130,6 +132,24 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
   }
 
   return "generated";
+}
+
+async function boundedCleanup(
+  cleanup: () => Promise<void>,
+  ref: DigestRef,
+  lockToken: string,
+): Promise<void> {
+  const cleanupDeadline = Date.now() + GENERATION_LOCK_TTL_SECONDS * 1000 - 1_000;
+  try {
+    await withinDeadline(cleanup(), cleanupDeadline, "lock cleanup");
+  } catch (error) {
+    // Do not leave the module-level guard set forever if a late KV write or
+    // release never settles. The KV lock remains protected until its TTL and
+    // release checks the token before deleting, so a late delete cannot remove
+    // a newer local owner's lock.
+    cancelGenerationLockAttempt(ref, lockToken);
+    logReleaseFailure(ref, error);
+  }
 }
 
 /**
@@ -255,7 +275,10 @@ function logReleaseFailure(ref: DigestRef, error: unknown): void {
  */
 async function withinDeadline<T>(work: Promise<T>, deadlineAt: number, stage: string): Promise<T> {
   const remaining = deadlineAt - Date.now();
-  if (remaining <= 0) throw new Error(`Digest generation deadline exceeded during ${stage}`);
+  if (remaining <= 0) {
+    void work.catch(() => undefined);
+    throw new Error(`Digest generation deadline exceeded during ${stage}`);
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
