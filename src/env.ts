@@ -124,10 +124,9 @@ export function maxSubscriptionsOf(env: Env): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 20;
 }
 
-/** Exact hostnames, with all configured restrictions required. Fail closed. */
+/** Allow any HTTP(S) feed unless an optional hostname or token restriction is configured. */
 export function isFeedAllowed(env: Env, feed: URL, token: string | null): boolean {
   const hosts = (env.ALLOWED_FEED_HOSTS ?? "").split(",").map(host => host.trim().toLowerCase()).filter(Boolean);
-  if (!hosts.length && !env.FEED_TOKEN) return false;
   if (hosts.length && !hosts.includes(feed.hostname.toLowerCase())) return false;
   return !env.FEED_TOKEN || token === env.FEED_TOKEN;
 }

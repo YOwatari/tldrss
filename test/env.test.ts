@@ -1,4 +1,4 @@
-import { type Env, maxSubscriptionsOf } from "../src/env";
+import { type Env, isFeedAllowed, maxSubscriptionsOf } from "../src/env";
 import { describe, expect, it } from "vitest";
 import {
   MAX_ENTRIES_CEILING,
@@ -98,4 +98,18 @@ it.each([undefined, "", "0", "-1", "1.5", "oops", "Infinity"])("defaults invalid
 });
 it("accepts a positive subscription cap", () => {
   expect(maxSubscriptionsOf({ MAX_SUBSCRIPTIONS: "3" } as Env)).toBe(3);
+});
+
+describe("isFeedAllowed", () => {
+  it("allows arbitrary HTTP(S) feeds by default", () => {
+    expect(isFeedAllowed({} as Env, new URL("https://github.blog/changelog/feed/"), null)).toBe(true);
+    expect(isFeedAllowed({} as Env, new URL("https://feeds.example.org/rss"), null)).toBe(true);
+  });
+
+  it("keeps optional hostname and token restrictions", () => {
+    expect(isFeedAllowed({ ALLOWED_FEED_HOSTS: "example.org" } as Env, new URL("https://example.org/rss"), null)).toBe(true);
+    expect(isFeedAllowed({ ALLOWED_FEED_HOSTS: "example.org" } as Env, new URL("https://other.org/rss"), null)).toBe(false);
+    expect(isFeedAllowed({ FEED_TOKEN: "secret" } as Env, new URL("https://anywhere.org/rss"), "secret")).toBe(true);
+    expect(isFeedAllowed({ FEED_TOKEN: "secret" } as Env, new URL("https://anywhere.org/rss"), null)).toBe(false);
+  });
 });
