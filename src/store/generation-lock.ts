@@ -129,7 +129,7 @@ export async function releaseGenerationLock(
     if (currentToken === null) {
       // The KV entry may have expired or been removed by test cleanup. No
       // remote owner exists in that case, so clear a stale local guard too.
-      inFlight.delete(key);
+      if (ownsLocalGuard) inFlight.delete(key);
       return;
     }
     if (currentToken !== token) return;

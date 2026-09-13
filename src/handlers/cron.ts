@@ -57,6 +57,7 @@ export async function handleScheduled(
   trigger: CronTrigger,
   env: Env,
   summarizer: Summarizer,
+  trackCleanup?: (promise: Promise<void>) => void,
 ): Promise<CronRunSummary> {
   const startedAt = Date.now();
   const scheduledAt = new Date(trigger.scheduledTime);
@@ -102,6 +103,7 @@ export async function handleScheduled(
       const outcome = await generateFor(env, summarizer, subscription, {
         origin,
         now: scheduledAt,
+        trackCleanup,
       });
 
       if (outcome === "generated") tally.generated += 1;
@@ -131,7 +133,7 @@ function generateFor(
   env: Env,
   summarizer: Summarizer,
   subscription: SubscriptionEntry,
-  run: { origin: string; now: Date },
+  run: { origin: string; now: Date; trackCleanup?: (promise: Promise<void>) => void },
 ): Promise<GenerationOutcome> {
   const ref: DigestRef = {
     hash: subscription.hash,
@@ -147,6 +149,7 @@ function generateFor(
     feedUrl: new URL(subscription.url),
     links: digestLinksOf(run.origin, ref),
     now: run.now,
+    trackCleanup: run.trackCleanup,
   });
 }
 

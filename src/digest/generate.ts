@@ -40,6 +40,8 @@ export type GenerateDigestParams = {
   ref: DigestRef;
   feedUrl: URL;
   links: DigestLinks;
+  /** Keeps late KV cleanup alive after the generation deadline. */
+  trackCleanup?: (promise: Promise<void>) => void;
   /**
    * The instant the day's entries are selected against. The cron run passes
    * its scheduled time, so a run that starts late still covers the window its
@@ -77,7 +79,7 @@ export function digestLinksOf(origin: string, ref: DigestRef): DigestLinks {
  * digest means differs per caller, and both of them have somewhere to put it.
  */
 export async function generateDigest(params: GenerateDigestParams): Promise<GenerationOutcome> {
-  const { env, summarizer, ref, feedUrl, links, now } = params;
+  const { env, summarizer, ref, feedUrl, links, now, trackCleanup } = params;
   const deadlineAt = Date.now() + generationTimeoutMsOf(env);
 
   if ((await withinDeadline(getDigest(env.DIGEST_CACHE, ref), deadlineAt, "digest lookup")) !== null) return "cached";
@@ -108,7 +110,9 @@ export async function generateDigest(params: GenerateDigestParams): Promise<Gene
     if (storage.late || Date.now() >= deadlineAt) {
       // Cleanup must not extend the generation deadline. The lock module keeps
       // its in-isolate guard until the pending KV operation and release finish.
-      void boundedCleanup(cleanup, ref, lockToken, lockExpiresAt);
+      const cleanupPromise = boundedCleanup(cleanup, ref, lockToken, lockExpiresAt);
+      if (trackCleanup) trackCleanup(cleanupPromise);
+      else void cleanupPromise;
     } else {
       try {
         await withinDeadline(cleanup(), deadlineAt, "lock cleanup");
