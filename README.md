@@ -9,9 +9,9 @@ Choose a period per subscription with `period=daily` (default) or `period=weekly
 /feed?url=https%3A%2F%2Fexample.com%2Frss.xml&lang=ja&period=weekly
 ```
 
-- `daily` preserves the existing behavior: the last 24 hours at generation time, one edition per JST date.
+- `daily` editions are fixed windows: the previous day at 08:50 JST inclusive through the edition date at 08:50 JST exclusive, published at 09:00 JST. The window is derived from the edition date, never from the time generation happens.
 - `weekly` summarizes the completed JST calendar week, Monday 00:00 inclusive to the following Monday 00:00 exclusive. The edition is dated by that ending Monday, with a fixed 09:00 JST publication time. For example, the September 14 edition covers September 7–13. A midweek subscription receives this completed week's edition too.
-- The daily 08:50 JST Cron also processes weekly subscriptions. Once a weekly edition is cached, subsequent runs skip it; the next Monday produces the next edition. Cron pre-generates only English, as before.
+- The daily 08:50 JST Cron also processes weekly subscriptions. It pre-generates the next edition before its 09:00 JST publication time; HTTP polls before publication continue to receive the previous edition. Once an edition is cached, subsequent runs skip it; the next boundary produces the next edition. Cron pre-generates only English, as before.
 - Weekly XML and HTML are retained for 14 days, and a cache miss falls back to the previous week while generating in the background. Daily retention remains 48 hours.
 - Periods have separate subscription records, cache keys, generation locks and item GUIDs. Weekly keys append `:weekly`; weekly GUIDs append `-weekly`; page links include `&period=weekly`. Existing daily keys, GUIDs and links remain valid.
 - Daily and weekly subscriptions to the same source each count toward `MAX_SUBSCRIPTIONS`. Both expire after 8 days without reader polls; the period controls publication, not polling frequency.
@@ -25,8 +25,8 @@ The details below describe the default daily mode unless otherwise stated.
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
 - `GET /digest/{sha256(url)}/{JST date}?lang={en|ja}` serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here. The item link always spells the language out, `lang=en` included, so it keeps pointing at the same digest if the default ever changes; `lang` may be omitted when requesting the page by hand, and then defaults to `en`.
 - `/` answers with usage instructions; `/health` reports Cron and storage health, and any other path is a 404.
-- The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries from the last 24 hours (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
-- Entries the feed gave no readable date are skipped, as are entries dated ahead of the current time: a feed with a skewed clock would otherwise pin them to the top of every digest.
+- The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries in the edition's fixed window (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
+- Entries the feed gave no readable date are skipped, as are entries outside the fixed edition window: a feed with a skewed clock would otherwise pin them to the top of a later digest.
 - Digest XML is cached in Workers KV (`DIGEST_CACHE`) under `digest:{sha256(url)}:{JST date}:{lang}` for 48 hours, so yesterday's digest stays servable when today's generation fails. The body of the page is stored beside it under `digest-html:{...}`.
 - The digest carries at most one `<item>`, its `<guid isPermaLink="false">` is `{sha256(url)}-{JST date}-{lang}`, and its `<pubDate>` is 09:00 JST of the day it covers rather than the generation time — Slack posts one message per new guid, and readers sort by `pubDate`. The channel also carries a `<lastBuildDate>`, but no `<atom:link rel="self">`: a self address would have to be the `/feed?url=...` the reader subscribed to, and that is the one thing the XML must not carry.
 - A day the feed published nothing gets an item-less channel, so Slack posts nothing. Set `POST_NO_UPDATES` to have it report the quiet day instead.
@@ -69,7 +69,7 @@ Upstream and model failures are logged and answered with 200, never with an erro
 A cron trigger runs at 08:50 JST (`50 23 * * *` in UTC, the schedule Cloudflare reads) and generates the day's digest for every subscription, so the 09:00 crawl is served straight from KV.
 
 - Subscriptions are one KV record per feed, `sub:{sha256(url)}`, holding the feed url and when it was last crawled. Separate keys rather than one list: several feeds are crawled at once, and a read-modify-write of a shared list would drop whatever was registered in between. An authorized `/feed` crawl registers it automatically, including on a digest cache hit. `lastSeenAt` is refreshed only after 12 hours, preserving `registeredAt`. Each subscription write extends its KV TTL to 8 days; when crawls stop, KV expires the record and Cron no longer lists it. Cron also deletes records whose `lastSeenAt` is at least 8 days before the scheduled time, covering legacy subscriptions stored without a TTL. Deleted subscriptions count as skipped; a deletion failure counts as failed and does not stop other feeds.
-- The base time is the scheduled time, not the moment the run starts: a run the platform starts late still covers the 24 hours its schedule named, and dates the digest by the JST day that window ends on — 23:50 UTC is already tomorrow in Tokyo.
+- The base time is the scheduled time, not the moment the run starts: a late run still generates the edition named by the schedule. HTTP and Cron share the injected-clock period calculation, so retries and either entry point derive identical `date`, `windowStart`, `windowEnd`, and `publishAt` values.
 - Five feeds are generated at once, and one feed's failure is counted rather than raised, so it costs no other feed its digest.
 - A digest the day already has is left alone and no model is called, which keeps a re-run by hand free. There is no `?force=` to override that: the endpoint is public.
 - Only the default language is pre-generated. A subscription names a feed, not a language, and generating every language would multiply the cost of the run; a crawl in another language still has its digest built in the background.
@@ -197,6 +197,14 @@ key disappears after eight days without another crawl.
 
 Slack's official setup requires installing the RSS app and selecting a channel
 for the feed. Validate the URL with the W3C feed validator if Slack rejects it.
+
+The 09:00 JST publication boundary is intentional: the 08:50 Cron may finish
+early and cache the next edition, but a poll before 09:00 still receives the
+previous edition. Existing daily cache keys and GUIDs remain date-based; the
+fixed window changes only which articles belong to a date, so no key migration
+is needed. Weekly keys and GUIDs retain their `:weekly`/`-weekly` suffixes.
+Verify this boundary in the Slack test from issue #9 by polling at 08:59 and
+09:00 JST and confirming one stable GUID per published edition.
 
 The cap uses KV listing and serializes registrations within one isolate. KV is eventually consistent and has no atomic compare-and-set, so simultaneous registrations across isolates can temporarily exceed the cap. Separate `sub:{hash}` keys ensure concurrent registration of different feeds does not overwrite subscriptions. The token authenticates the caller; it does not widen the destination policy. Host restrictions are applied to the initial URL and every redirect. Cron re-checks stored subscriptions at run time, so changing `ALLOWED_FEED_HOSTS` safely skips subscriptions that are no longer permitted. The skip log contains only the subscription hash and a generic reason; no feed URL or token is recorded. Other subscriptions continue, and rejected destinations never reach XML parsing or AI.
 

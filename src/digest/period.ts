@@ -1,7 +1,14 @@
-import { jstDate } from "../time";
+import { jstDate, jstInstant } from "../time";
 
 export const DIGEST_PERIODS = ["daily", "weekly"] as const;
 export type DigestPeriod = typeof DIGEST_PERIODS[number];
+export type DigestEdition = {
+  date: string;
+  period: DigestPeriod;
+  windowStart: string;
+  windowEnd: string;
+  publishAt: string;
+};
 const DAY_MS = 86_400_000;
 
 export function isDigestPeriod(value: string): value is DigestPeriod {
@@ -19,6 +26,33 @@ export function periodDate(now: Date, period: DigestPeriod = "daily"): string {
   const day = new Date(`${date}T00:00:00Z`);
   day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7);
   return day.toISOString().slice(0, 10);
+}
+
+/** The edition that is publicly available at `now`. */
+export function publishedPeriodDate(now: Date, period: DigestPeriod = "daily"): string {
+  const candidate = periodDate(now, period);
+  return now.getTime() >= publishAt(candidate, period).getTime() ? candidate : previousPeriodDate(candidate, period);
+}
+
+/** The fixed source window for an edition, independent of when it is built. */
+export function periodWindow(date: string, period: DigestPeriod = "daily"):
+  { start: Date; end: Date; publishAt: Date } {
+  if (period === "weekly") {
+    const end = jstInstant(date, 0);
+    return { start: new Date(end.getTime() - 7 * DAY_MS), end, publishAt: jstInstant(date, 9) };
+  }
+  const end = jstInstant(date, 8, 50);
+  return { start: new Date(end.getTime() - DAY_MS), end, publishAt: jstInstant(date, 9) };
+}
+
+/** Full stable edition contract used by both Cron and HTTP generation. */
+export function editionOf(date: string, period: DigestPeriod = "daily"): DigestEdition {
+  const window = periodWindow(date, period);
+  return { date, period, windowStart: window.start.toISOString(), windowEnd: window.end.toISOString(), publishAt: window.publishAt.toISOString() };
+}
+
+export function publishAt(date: string, period: DigestPeriod = "daily"): Date {
+  return periodWindow(date, period).publishAt;
 }
 
 export function previousPeriodDate(date: string, period: DigestPeriod = "daily"): string {

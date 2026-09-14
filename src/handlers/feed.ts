@@ -7,13 +7,14 @@ import {
 import { buildEmptyChannelXml } from "../digest/build";
 import { digestLinksOf, generateDigest } from "../digest/generate";
 import type { DigestLinks } from "../digest/types";
-import { type Env, maxSubscriptionsOf } from "../env";
+import { publicOriginOf, type Env, maxSubscriptionsOf } from "../env";
 import { isFeedRequestAuthorized } from "../feed/policy";
 import { register, touch, SubscriptionLimitError } from "../store/subscriptions";
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
-import { isDigestPeriod, periodDate, previousPeriodDate } from "../digest/period";
+import { isDigestPeriod, previousPeriodDate, publishedPeriodDate } from "../digest/period";
+import { nowOf, systemClock, type Clock } from "../time";
 import { FeedFetchError } from "../feed/fetch";
 import { WorkersAiError } from "../llm/workers-ai";
 
@@ -61,6 +62,7 @@ export async function handleFeed(
   env: Env,
   ctx: ExecutionContext,
   summarizer: Summarizer,
+  clock: Clock = systemClock,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
 
@@ -86,7 +88,7 @@ export async function handleFeed(
   if (!isDigestPeriod(period)) {
     return new Response("Unsupported period query parameter. Supported: daily, weekly", { status: 400 });
   }
-  const now = new Date();
+  const now = nowOf(clock);
 
   if (!isFeedRequestAuthorized(env, feedUrl, requestUrl.searchParams.get("token"))) {
     return new Response("Feed access forbidden", { status: 403 });
@@ -107,7 +109,7 @@ export async function handleFeed(
 
   const ref: DigestRef = {
     hash,
-    date: periodDate(now, period),
+    date: publishedPeriodDate(now, period),
     language,
     period,
   };
@@ -115,7 +117,7 @@ export async function handleFeed(
   const today = await getDigest(env.DIGEST_CACHE, ref);
   if (today) return xmlResponse(today);
 
-  const links = digestLinksOf(requestUrl.origin, ref);
+  const links = digestLinksOf(publicOriginOf(env) ?? requestUrl.origin, ref);
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.

@@ -1,6 +1,6 @@
 import type { FeedEntry } from "./parse";
 
-/** The digest covers one day, so entries older than this are out of scope. */
+/** Default selection window for callers that do not supply fixed boundaries. */
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -30,7 +30,7 @@ function publishedAt(entry: FeedEntry): number | null {
 }
 
 /**
- * The entries of the last 24 hours, newest first, capped at `maxEntries`.
+ * Entries in the requested window, newest first, capped at `maxEntries`.
  *
  * Undated entries are dropped rather than assumed recent: a feed that omits
  * dates would otherwise have its whole backlog summarized every day. Entries
@@ -42,16 +42,18 @@ function publishedAt(entry: FeedEntry): number | null {
  */
 export function selectRecentEntries(
   entries: FeedEntry[],
-  options: { now?: Date; maxEntries?: number; windowMs?: number; exclusiveEnd?: boolean } = {},
+  options: { now?: Date; maxEntries?: number; windowMs?: number; exclusiveEnd?: boolean; start?: Date; end?: Date } = {},
 ): EntrySelection {
   const nowMs = (options.now ?? new Date()).getTime();
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const cutoff = nowMs - (options.windowMs ?? WINDOW_MS);
+  const startMs = options.start?.getTime() ?? cutoff;
+  const endMs = options.end?.getTime() ?? nowMs;
 
   const dated = entries
     .map((entry) => ({ entry, at: publishedAt(entry) }))
     .filter((item): item is { entry: FeedEntry; at: number } => item.at !== null)
-    .filter((item) => item.at >= cutoff && (options.exclusiveEnd ? item.at < nowMs : item.at <= nowMs))
+    .filter((item) => item.at >= startMs && (options.exclusiveEnd || options.end ? item.at < endMs : item.at <= nowMs))
     // Feeds are not required to be newest-first, so order before capping.
     .sort((left, right) => right.at - left.at);
 

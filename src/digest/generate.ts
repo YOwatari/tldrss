@@ -11,7 +11,7 @@
 import { buildDigestXml, buildEmptyChannelXml } from "./build";
 import { renderDigestHtml, renderEntryListHtml } from "./html";
 import type { DigestLanguage } from "./language";
-import { periodDays, type DigestPeriod } from "./period";
+import { editionOf, periodWindow, type DigestPeriod } from "./period";
 import { noRecentEntriesText } from "./text";
 import type { Digest, DigestLinks } from "./types";
 import { feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
@@ -44,11 +44,7 @@ export type GenerateDigestParams = {
   links: DigestLinks;
   /** Keeps late KV cleanup alive after the generation deadline. */
   trackCleanup?: (promise: Promise<void>) => void;
-  /**
-   * The instant the day's entries are selected against. The cron run passes
-   * its scheduled time, so a run that starts late still covers the window its
-   * schedule named; a crawl leaves it at the current time.
-   */
+  /** Legacy scheduling hint; the stable ref date now determines the window. */
   now?: Date;
 };
 
@@ -303,11 +299,12 @@ async function buildDigest(
     isAllowed: (url) => isFeedDestinationAllowed(env, url),
   }));
   const feedTitle = feed.title ?? feedUrl.host;
+  const window = periodWindow(ref.date, ref.period);
   const selection = selectRecentEntries(feed.items, {
-    now: ref.period === "weekly" ? new Date(`${ref.date}T00:00:00+09:00`) : now,
+    now: window.end,
     maxEntries: maxEntriesOf(env),
-    windowMs: periodDays(ref.period) * 86_400_000,
-    exclusiveEnd: ref.period === "weekly",
+    start: window.start,
+    end: window.end,
   });
 
   const html =
@@ -315,5 +312,5 @@ async function buildDigest(
       ? renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language)
       : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
-  return { ...ref, feedTitle, html, entries: selection.entries };
+  return { ...ref, ...editionOf(ref.date, ref.period), feedTitle, html, entries: selection.entries };
 }
