@@ -1,5 +1,5 @@
 import { createExecutionContext, env as providedEnv, reset, waitOnExecutionContext } from "cloudflare:test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../../src/env";
 import { handleFeed } from "../../src/handlers/feed";
 import type { DigestInput, Summarizer } from "../../src/llm/summarizer";
@@ -49,6 +49,12 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   await reset();
+});
+
+beforeEach(() => {
+  // Relative fixtures are intentionally inside the fixed daily edition window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-14T00:00:00Z"));
 });
 
 describe("handleFeed (summarizer injection)", () => {

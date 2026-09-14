@@ -13,7 +13,7 @@ import { jstDate, previousDate } from "../src/time";
 // `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
 // wrangler.toml, while Workers AI is stubbed per test (it would call out to the
 // Cloudflare API otherwise).
-const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example" };
+const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example", PUBLIC_ORIGIN: "https://worker.example" };
 
 const FEED_ORIGIN = "https://source.example";
 const FEED_URL = `${FEED_ORIGIN}/rss.xml`;
@@ -102,6 +102,12 @@ afterEach(async () => {
   vi.useRealTimers();
   // Storage is shared across tests in this pool; drop KV state between them.
   await reset();
+});
+
+beforeEach(() => {
+  // Keep relative feed fixtures inside the fixed 08:50–08:50 JST edition window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-14T00:00:00Z"));
 });
 
 describe("routing", () => {
@@ -548,26 +554,27 @@ describe("GET /feed (JST day boundary)", () => {
     return keys.keys.map((entry) => entry.name).sort().at(-1) ?? "";
   }
 
-  it("switches the key at 15:00 UTC, not at midnight UTC", async () => {
+  it("switches the public key at 09:00 JST", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
 
-    const beforeBoundary = await keyWrittenAt("2026-09-10T14:59:59Z");
+    const beforeBoundary = await keyWrittenAt("2026-09-13T23:59:59Z");
     await reset();
-    const afterBoundary = await keyWrittenAt("2026-09-10T15:00:00Z");
+    const afterBoundary = await keyWrittenAt("2026-09-14T00:00:00Z");
 
-    expect(beforeBoundary).toContain(":2026-09-10:");
-    expect(afterBoundary).toContain(":2026-09-11:");
+    expect(beforeBoundary).toContain(":2026-09-13:");
+    expect(afterBoundary).toContain(":2026-09-14:");
   });
 
-  it("keeps one key across midnight UTC, which is 09:00 JST", async () => {
+  it("keeps one edition date before the publication boundary", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
 
-    const lateEvening = await keyWrittenAt("2026-09-10T23:50:00Z");
+    const beforePublication = await keyWrittenAt("2026-09-13T23:50:00Z");
     await reset();
-    const afterUtcMidnight = await keyWrittenAt("2026-09-11T00:10:00Z");
+    const afterPublication = await keyWrittenAt("2026-09-14T00:10:00Z");
 
-    expect(lateEvening).toContain(":2026-09-11:");
-    expect(afterUtcMidnight).toBe(lateEvening);
+    expect(beforePublication).toContain(":2026-09-13:");
+    expect(afterPublication).toContain(":2026-09-14:");
+    expect(afterPublication).not.toBe(beforePublication);
   });
 });
 
