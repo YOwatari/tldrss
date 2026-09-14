@@ -88,7 +88,7 @@ describe("createWorkersAiSummarizer", () => {
   it("gives up after the retry and reports the last failure", async () => {
     const { ai, run } = stubAi(new Error("first"), new Error("second"));
 
-    await expect(createWorkersAiSummarizer({ ai }).summarize(input)).rejects.toThrow("second");
+    await expect(createWorkersAiSummarizer({ ai }).summarize(input)).rejects.toThrow("Workers AI provider");
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -105,6 +105,17 @@ describe("createWorkersAiSummarizer", () => {
 
     await expect(createWorkersAiSummarizer({ ai }).summarize(input)).rejects.toThrow(
       /Workers AI/,
+    );
+  });
+
+  it("does not retain an unexpected response in the error", async () => {
+    const secret = "model-secret-and-feed-token";
+    const { ai } = stubAi({ response: secret }, { response: { secret } });
+
+    await expect(createWorkersAiSummarizer({ ai }).summarize(input)).resolves.toBe(secret);
+    const { ai: badAi } = stubAi({ unexpected: secret }, { unexpected: secret });
+    await expect(createWorkersAiSummarizer({ ai: badAi }).summarize(input)).rejects.toThrow(
+      new RegExp(`Workers AI invalid response`),
     );
   });
 

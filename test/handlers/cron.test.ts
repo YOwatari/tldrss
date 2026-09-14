@@ -141,7 +141,7 @@ describe("handleScheduled", () => {
     expect(summary).toMatchObject({ total: 1, generated: 1, skipped: 0, failed: 0 });
     await expect(digestOf(hash)).resolves.toContain("<rss");
     expect(errors.mock.calls).toEqual([
-      [`Failed to release generation lock for ${hash} (Error)`],
+      [JSON.stringify({ event: "digest.error", stage: "kv", code: "lock_release_failed", hash })],
     ]);
 
     const repeated = await run(env, summarizer);
@@ -173,8 +173,8 @@ describe("handleScheduled", () => {
       expect(summary).toMatchObject({ total: 1, generated: 0, skipped: 0, failed: 1 });
       await expect(digestOf(hash)).resolves.toBeNull();
       expect(errors.mock.calls).toEqual([
-        [`Failed to release generation lock for ${hash} (Error)`],
-        [`Failed to generate digest for ${hash} (TypeError)`],
+        [JSON.stringify({ event: "digest.error", stage: "kv", code: "lock_release_failed", hash })],
+        [JSON.stringify({ event: "cron.error", stage: "digest", code: "generation_failed", hash })],
       ]);
     },
   );

@@ -10,6 +10,22 @@ const MAX_TOKENS = 1024;
 /** One retry: enough for a transient upstream failure, without doubling cost twice. */
 const MAX_ATTEMPTS = 2;
 
+export type WorkersAiErrorCode = "timeout" | "invalid_response" | "provider" | "deadline";
+
+/** An operational error whose message is deliberately safe to log. */
+export class WorkersAiError extends Error {
+  constructor(readonly code: WorkersAiErrorCode) {
+    super(
+      code === "timeout"
+        ? "Workers AI timed out"
+        : code === "deadline"
+          ? "Workers AI deadline exceeded"
+          : `Workers AI ${code.replace("_", " ")}`,
+    );
+    this.name = "WorkersAiError";
+  }
+}
+
 /**
  * What all attempts together may take. Generation runs in `ctx.waitUntil`,
  * which Cloudflare extends for at most 30 seconds after the response, and the
@@ -34,7 +50,9 @@ function extractResponseText(result: unknown): string {
     if (typeof response === "string" && response.trim() !== "") return response.trim();
   }
 
-  throw new Error(`Unexpected Workers AI response: ${JSON.stringify(result)}`);
+  // The response can contain model output and arbitrary feed data. Never put
+  // it in an exception: callers may log the exception.
+  throw new WorkersAiError("invalid_response");
 }
 
 /**
@@ -45,7 +63,7 @@ function extractResponseText(result: unknown): string {
 async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Workers AI timed out after ${timeoutMs}ms`)), timeoutMs);
+    timer = setTimeout(() => reject(new WorkersAiError("timeout")), timeoutMs);
   });
 
   try {
@@ -87,10 +105,10 @@ export function createWorkersAiSummarizer(params: { ai: Ai; model?: string }): S
             ? AI_TIMEOUT_MS * (MAX_ATTEMPTS - tries)
             : options.deadlineAt - Date.now() - STORAGE_BUDGET_MS;
           const timeoutMs = Math.floor(remaining / (MAX_ATTEMPTS - tries));
-          if (timeoutMs <= 0) throw new Error("Generation deadline exceeded before Workers AI");
+          if (timeoutMs <= 0) throw new WorkersAiError("deadline");
           return await attempt(input, Math.min(AI_TIMEOUT_MS, timeoutMs));
         } catch (error) {
-          lastError = error;
+          lastError = error instanceof WorkersAiError ? error : new WorkersAiError("provider");
         }
       }
 
