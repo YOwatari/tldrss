@@ -8,12 +8,12 @@ import type { DigestPeriod } from "./period";
 const TEXT = {
   en: {
     untitledEntry: "(untitled)",
-    noRecentEntries: "No new entries were published in the last 24 hours.",
+    noRecentEntries: "No new entries were published in the covered daily window.",
     summaryUnavailable: "A summary could not be generated, so today's entries are listed below.",
   },
   ja: {
     untitledEntry: "(タイトルなし)",
-    noRecentEntries: "24 時間以内に公開された新しいエントリはありません。",
+    noRecentEntries: "対象の日次期間に公開された新しいエントリはありません。",
     summaryUnavailable: "要約を生成できませんでした。本日のエントリを一覧で掲載します。",
   },
 } satisfies Record<DigestLanguage, Record<string, string>>;

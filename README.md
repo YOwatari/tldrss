@@ -203,6 +203,8 @@ early and cache the next edition, but a poll before 09:00 still receives the
 previous edition. Daily cache/page keys use `:v2` so old rolling-window values
 cannot be served as fixed-window editions; GUIDs remain date-based and stable.
 Weekly keys and GUIDs retain their `:weekly`/`-weekly` suffixes.
+HTTP response caching is shortened at the next publication boundary so an edge
+cache cannot carry the previous edition across 09:00 JST.
 Verify this boundary in the Slack test from issue #9 by polling at 08:59 and
 09:00 JST and confirming one stable GUID per published edition.
 

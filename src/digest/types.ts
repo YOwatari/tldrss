@@ -17,9 +17,9 @@ export type Digest = {
   language: DigestLanguage;
   period?: DigestPeriod;
   /** Fixed edition boundaries, serialized in the digest contract. */
-  windowStart?: string;
-  windowEnd?: string;
-  publishAt?: string;
+  windowStart: string;
+  windowEnd: string;
+  publishAt: string;
   /** Title the source feed gave itself, or its host. */
   feedTitle: string;
   /** Digest body as a sanitized HTML fragment; see `renderDigestHtml`. */

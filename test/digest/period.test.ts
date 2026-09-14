@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { digestTtlSeconds, editionOf, periodDate, periodWindow, previousPeriodDate, publishedPeriodDate } from "../../src/digest/period";
+import { digestTtlSeconds, editionOf, nextPublicationAt, periodDate, periodWindow, previousPeriodDate, publishedPeriodDate } from "../../src/digest/period";
 import { selectRecentEntries } from "../../src/feed/select";
 import { buildDigestPrompt, systemPromptFor } from "../../src/llm/prompt";
 
@@ -69,5 +69,10 @@ describe("daily fixed editions", () => {
       { isoDate: window.end.toISOString() },
     ];
     expect(selectRecentEntries(entries, { start: window.start, end: window.end }).entries).toEqual(entries.slice(0, 2).reverse());
+  });
+
+  it("finds the next publication boundary for response cache expiry", () => {
+    expect(nextPublicationAt(new Date("2026-09-13T23:59:59Z")).toISOString()).toBe("2026-09-14T00:00:00.000Z");
+    expect(nextPublicationAt(new Date("2026-09-14T00:00:00Z")).toISOString()).toBe("2026-09-15T00:00:00.000Z");
   });
 });

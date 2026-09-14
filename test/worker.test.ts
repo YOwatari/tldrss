@@ -298,7 +298,7 @@ describe("GET /feed (cache miss)", () => {
     expect(run.mock.calls[0][0]).toBe("@cf/meta/llama-3.2-3b-instruct");
   });
 
-  it("skips the model call when nothing was published in the last 24 hours", async () => {
+  it("skips the model call when nothing was published in the covered window", async () => {
     const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
     stubFeedFetch(() => new Response(rssWithEntry(stale)));
     const { ai, run } = stubAi();
@@ -318,7 +318,7 @@ describe("GET /feed (cache miss)", () => {
     const body = await digestOf({ ...bindings, AI: ai, POST_NO_UPDATES: "true" });
 
     expect(body).toContain("<item>");
-    expect(body).toContain("No new entries were published in the last 24 hours.");
+    expect(body).toContain("No new entries were published in the covered daily window.");
     expect(run).not.toHaveBeenCalled();
   });
 });
@@ -607,7 +607,7 @@ describe("GET /feed (language)", () => {
       `${WORKER_URL}&lang=ja`,
     );
 
-    expect(body).toContain("24 時間以内に公開された新しいエントリはありません。");
+    expect(body).toContain("対象の日次期間に公開された新しいエントリはありません。");
     expect(run).not.toHaveBeenCalled();
   });
 

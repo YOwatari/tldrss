@@ -55,6 +55,20 @@ export function publishAt(date: string, period: DigestPeriod = "daily"): Date {
   return periodWindow(date, period).publishAt;
 }
 
+export function nextPeriodDate(date: string, period: DigestPeriod = "daily"): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + periodDays(period) * DAY_MS)
+    .toISOString().slice(0, 10);
+}
+
+/** The next publication boundary, used to keep edge caches from crossing it. */
+export function nextPublicationAt(now: Date, period: DigestPeriod = "daily"): Date {
+  const current = periodDate(now, period);
+  const currentPublication = publishAt(current, period);
+  return now.getTime() < currentPublication.getTime()
+    ? currentPublication
+    : publishAt(nextPeriodDate(current, period), period);
+}
+
 export function previousPeriodDate(date: string, period: DigestPeriod = "daily"): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) - periodDays(period) * DAY_MS)
     .toISOString().slice(0, 10);

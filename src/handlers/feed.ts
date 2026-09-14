@@ -13,7 +13,7 @@ import { register, touch, SubscriptionLimitError } from "../store/subscriptions"
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
-import { isDigestPeriod, previousPeriodDate, publishedPeriodDate } from "../digest/period";
+import { isDigestPeriod, nextPublicationAt, previousPeriodDate, publishedPeriodDate, type DigestPeriod } from "../digest/period";
 import { nowOf, systemClock, type Clock } from "../time";
 import { FeedFetchError } from "../feed/fetch";
 import { WorkersAiError } from "../llm/workers-ai";
@@ -22,13 +22,16 @@ import { WorkersAiError } from "../llm/workers-ai";
  * Slack polls every 15-30 minutes, so five minutes of edge caching cuts
  * repeated origin hits without delaying a digest by a noticeable amount.
  */
-const XML_HEADERS = {
-  "content-type": "application/xml; charset=utf-8",
-  "cache-control": "public, max-age=300",
-};
+const XML_CONTENT_TYPE = "application/xml; charset=utf-8";
 
-function xmlResponse(xml: string): Response {
-  return new Response(xml, { headers: XML_HEADERS });
+function xmlResponse(xml: string, now: Date, period: DigestPeriod): Response {
+  const secondsUntilPublication = Math.max(0, Math.ceil((nextPublicationAt(now, period).getTime() - now.getTime()) / 1000));
+  return new Response(xml, {
+    headers: {
+      "content-type": XML_CONTENT_TYPE,
+      "cache-control": `public, max-age=${Math.min(300, secondsUntilPublication)}`,
+    },
+  });
 }
 
 /**
@@ -115,7 +118,7 @@ export async function handleFeed(
   };
 
   const today = await getDigest(env.DIGEST_CACHE, ref);
-  if (today) return xmlResponse(today);
+  if (today) return xmlResponse(today, now, period);
 
   const links = digestLinksOf(publicOriginOf(env) ?? requestUrl.origin, ref);
 
@@ -129,10 +132,12 @@ export async function handleFeed(
     ...ref,
     date: previousPeriodDate(ref.date, period),
   });
-  if (yesterday) return xmlResponse(yesterday);
+  if (yesterday) return xmlResponse(yesterday, now, period);
 
   return xmlResponse(
     buildEmptyChannelXml({ feedTitle: feedUrl.host, language: ref.language, period, links }),
+    now,
+    period,
   );
 }
 
