@@ -13,7 +13,7 @@ import type { Summarizer } from "../llm/summarizer";
 import type { DigestRef } from "../store/digest-ref";
 import { putCronStatus, type CronRunSummary } from "../store/cron-status";
 import { getSubscription, listSubscriptions, remove, SUBSCRIPTION_TTL_SECONDS, type SubscriptionEntry } from "../store/subscriptions";
-import { jstDate, systemClock, type Clock } from "../time";
+import { jstDate } from "../time";
 import { periodDate } from "../digest/period";
 import { FeedFetchError } from "../feed/fetch";
 import { isFeedDestinationAllowed } from "../feed/policy";
@@ -59,14 +59,9 @@ export async function handleScheduled(
   trigger: CronTrigger,
   env: Env,
   summarizer: Summarizer,
-  trackCleanupOrClock?: ((promise: Promise<void>) => void) | Clock,
-  clock: Clock = systemClock,
+  trackCleanup?: (promise: Promise<void>) => void,
 ): Promise<CronRunSummary> {
-  const trackCleanup = typeof trackCleanupOrClock === "function" ? trackCleanupOrClock : undefined;
-  const runClock = typeof trackCleanupOrClock === "function" || trackCleanupOrClock === undefined
-    ? clock
-    : trackCleanupOrClock;
-  const startedAt = runClock.now().getTime();
+  const startedAt = Date.now();
   const scheduledAt = new Date(trigger.scheduledTime);
   const date = jstDate(scheduledAt);
 

@@ -64,6 +64,11 @@ export function periodSuffix(period: DigestPeriod = "daily"): string {
   return period === "daily" ? "" : `:${period}`;
 }
 
+/** Cache namespace for the fixed-window contract introduced after v1. */
+export function digestCacheSuffix(period: DigestPeriod = "daily"): string {
+  return period === "daily" ? ":v2" : periodSuffix(period);
+}
+
 export function digestTtlSeconds(period: DigestPeriod = "daily"): number {
   return periodDays(period) * 2 * DAY_MS / 1000;
 }

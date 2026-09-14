@@ -1,5 +1,5 @@
 import type { DigestRef } from "./digest-ref";
-import { digestTtlSeconds, periodSuffix } from "../digest/period";
+import { digestCacheSuffix, digestTtlSeconds } from "../digest/period";
 
 /**
  * Two days, so a digest stays servable as "yesterday's" even when the next
@@ -8,7 +8,7 @@ import { digestTtlSeconds, periodSuffix } from "../digest/period";
 export const DIGEST_TTL_SECONDS = 48 * 60 * 60;
 
 export function digestCacheKey(ref: DigestRef): string {
-  return `digest:${ref.hash}:${ref.date}:${ref.language}${periodSuffix(ref.period)}`;
+  return `digest:${ref.hash}:${ref.date}:${ref.language}${digestCacheSuffix(ref.period)}`;
 }
 
 export function getDigest(cache: KVNamespace, ref: DigestRef): Promise<string | null> {

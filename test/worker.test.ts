@@ -91,7 +91,7 @@ async function storedDigest(
   const listed = await bindings.DIGEST_CACHE.list({
     prefix: `digest:${await sha256Hex(feedUrl)}:`,
   });
-  const key = listed.keys.map((entry) => entry.name).find((name) => name.endsWith(`:${language}`));
+  const key = listed.keys.map((entry) => entry.name).find((name) => name.endsWith(`:${language}:v2`) || name.endsWith(`:${language}:weekly`));
   if (!key) return null;
 
   return { key, value: (await bindings.DIGEST_CACHE.get(key)) ?? "" };
@@ -236,7 +236,7 @@ describe("GET /feed (cache miss)", () => {
     // The date itself is covered by the `jstDate` unit tests; asserting the
     // shape here keeps this test independent of when it runs.
     expect(cached?.key).toMatch(
-      new RegExp(`^digest:${await sha256Hex(FEED_URL)}:\\d{4}-\\d{2}-\\d{2}:en$`),
+      new RegExp(`^digest:${await sha256Hex(FEED_URL)}:\\d{4}-\\d{2}-\\d{2}:en:v2$`),
     );
     expect(cached?.value).toContain("- summary");
     expect(cached?.value).toContain("Daily Digest: Test Feed");
@@ -357,7 +357,7 @@ describe("GET /feed (cache hit)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-10T03:00:00Z"));
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${previousDate(jstDate())}:en`;
+    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${previousDate(jstDate())}:en:v2`;
     await bindings.DIGEST_CACHE.put(yesterdayKey, "<rss>yesterday</rss>");
 
     const body = await (await callWorker({ ...bindings, AI: stubAi().ai })).text();
@@ -831,7 +831,7 @@ describe("scheduled", () => {
     expect(run).toHaveBeenCalledTimes(1);
     const stored = await storedDigest();
     expect(stored?.key).toBe(
-      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en`,
+      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en:v2`,
     );
     expect(stored?.value).toContain("https://worker.example/digest/");
   });

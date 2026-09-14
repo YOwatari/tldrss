@@ -104,3 +104,20 @@ it("does not expose the pre-generated daily edition before 09:00 JST", async () 
   });
   expect(await after.text()).toBe("<rss>current</rss>");
 });
+
+it("does not expose a pre-generated weekly edition before Monday 09:00 JST", async () => {
+  const { hash } = await register(env.DIGEST_CACHE, feedUrl, new Date("2026-09-14T00:00:00Z"), 20, "weekly");
+  await putDigest(env.DIGEST_CACHE, { hash, date: "2026-09-07", language: "en", period: "weekly" }, "<rss>previous week</rss>");
+  await putDigest(env.DIGEST_CACHE, { hash, date: "2026-09-14", language: "en", period: "weekly" }, "<rss>current week</rss>");
+  const request = new Request(`${env.PUBLIC_ORIGIN}/feed?url=${feedUrl}&period=weekly`);
+
+  const before = await handleFeed(request, env, createExecutionContext(), summarizer, {
+    now: () => new Date("2026-09-13T23:59:59Z"),
+  });
+  expect(await before.text()).toBe("<rss>previous week</rss>");
+
+  const after = await handleFeed(request, env, createExecutionContext(), summarizer, {
+    now: () => new Date("2026-09-14T00:00:00Z"),
+  });
+  expect(await after.text()).toBe("<rss>current week</rss>");
+});

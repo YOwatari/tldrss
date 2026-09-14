@@ -13,7 +13,7 @@ Choose a period per subscription with `period=daily` (default) or `period=weekly
 - `weekly` summarizes the completed JST calendar week, Monday 00:00 inclusive to the following Monday 00:00 exclusive. The edition is dated by that ending Monday, with a fixed 09:00 JST publication time. For example, the September 14 edition covers September 7–13. A midweek subscription receives this completed week's edition too.
 - The daily 08:50 JST Cron also processes weekly subscriptions. It pre-generates the next edition before its 09:00 JST publication time; HTTP polls before publication continue to receive the previous edition. Once an edition is cached, subsequent runs skip it; the next boundary produces the next edition. Cron pre-generates only English, as before.
 - Weekly XML and HTML are retained for 14 days, and a cache miss falls back to the previous week while generating in the background. Daily retention remains 48 hours.
-- Periods have separate subscription records, cache keys, generation locks and item GUIDs. Weekly keys append `:weekly`; weekly GUIDs append `-weekly`; page links include `&period=weekly`. Existing daily keys, GUIDs and links remain valid.
+- Periods have separate subscription records, cache keys, generation locks and item GUIDs. Fixed-window daily cache/page keys use the `:v2` suffix to invalidate rolling-24-hour entries from the migration; daily GUIDs and links remain date-based. Weekly keys append `:weekly`; weekly GUIDs append `-weekly`; page links include `&period=weekly`.
 - Daily and weekly subscriptions to the same source each count toward `MAX_SUBSCRIPTIONS`. Both expire after 8 days without reader polls; the period controls publication, not polling frequency.
 - Only articles still present in the upstream feed can be summarized. Weekly mode does not archive articles that disappeared from the source before generation. `MAX_ENTRIES` still limits the selected articles (default 30).
 
@@ -200,9 +200,9 @@ for the feed. Validate the URL with the W3C feed validator if Slack rejects it.
 
 The 09:00 JST publication boundary is intentional: the 08:50 Cron may finish
 early and cache the next edition, but a poll before 09:00 still receives the
-previous edition. Existing daily cache keys and GUIDs remain date-based; the
-fixed window changes only which articles belong to a date, so no key migration
-is needed. Weekly keys and GUIDs retain their `:weekly`/`-weekly` suffixes.
+previous edition. Daily cache/page keys use `:v2` so old rolling-window values
+cannot be served as fixed-window editions; GUIDs remain date-based and stable.
+Weekly keys and GUIDs retain their `:weekly`/`-weekly` suffixes.
 Verify this boundary in the Slack test from issue #9 by polling at 08:59 and
 09:00 JST and confirming one stable GUID per published edition.
 

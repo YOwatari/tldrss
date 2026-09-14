@@ -17,7 +17,7 @@ afterEach(async () => {
 
 describe("digestCacheKey", () => {
   it("is built from the hash, the JST date and the language", () => {
-    expect(digestCacheKey(REF)).toBe(`digest:${"a".repeat(64)}:2026-09-10:en`);
+  expect(digestCacheKey(REF)).toBe(`digest:${"a".repeat(64)}:2026-09-10:en:v2`);
   });
 
   it("separates the languages of one feed and day", () => {

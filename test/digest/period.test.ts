@@ -52,6 +52,15 @@ describe("daily fixed editions", () => {
     expect(publishedPeriodDate(new Date("2026-09-14T00:00:00Z"))).toBe("2026-09-14");
   });
 
+  it("keeps the weekly publication boundary across the year", () => {
+    expect(publishedPeriodDate(new Date("2027-01-03T23:59:59Z"), "weekly")).toBe("2026-12-28");
+    expect(publishedPeriodDate(new Date("2027-01-04T00:00:00Z"), "weekly")).toBe("2027-01-04");
+    expect(periodWindow("2027-01-04", "weekly")).toMatchObject({
+      start: new Date("2026-12-27T15:00:00Z"),
+      end: new Date("2027-01-03T15:00:00Z"),
+    });
+  });
+
   it("includes the start and excludes the end of the fixed window", () => {
     const window = periodWindow("2026-09-14");
     const entries = [

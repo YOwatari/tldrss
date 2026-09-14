@@ -31,7 +31,7 @@ it.each([
 ] as [Partial<Env>, string | undefined][])("rejects unauthorized crawls before any side effects: %j", async (config, token) => {
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
   // Authorization is also required for a cache hit.
-  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en`, "<rss/>");
+  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en:v2`, "<rss/>");
   expect((await crawl(config, token)).status).toBe(403);
   expect(await listSubscriptions(kv)).toEqual([]);
   expect(fetch).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ it.each([
   [{ ALLOWED_FEED_HOSTS: "", FEED_TOKEN: "secret" }, "secret"],
   [{ FEED_TOKEN: "secret" }, "secret"],
 ] as [Partial<Env>, string | undefined][])("registers on a cache hit with configured protection: %j", async (config, token) => {
-  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en`, "<rss/>");
+  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en:v2`, "<rss/>");
   expect((await crawl(config, token)).status).toBe(200);
   expect(await listSubscriptions(kv)).toMatchObject([{ url }]);
 });
@@ -51,7 +51,7 @@ it.each([
 it("refreshes a normalized cached subscription only after twelve hours", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-10T00:00:00Z"));
-  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en`, "<rss/>");
+  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en:v2`, "<rss/>");
   await crawl({}, undefined, url + "#fragment");
   vi.setSystemTime(new Date("2026-09-10T11:59:59Z"));
   await crawl();
@@ -63,7 +63,7 @@ it("refreshes a normalized cached subscription only after twelve hours", async (
 
 it("returns 429 for a new subscription at capacity while allowing existing crawls", async () => {
   await register(kv, url);
-  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en`, "<rss/>");
+  await kv.put(`digest:${await sha256Hex(url)}:${jstDate()}:en:v2`, "<rss/>");
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
   expect((await crawl({ MAX_SUBSCRIPTIONS: "1" }, undefined, url + "?other")).status).toBe(429);
   expect((await crawl({ MAX_SUBSCRIPTIONS: "1" })).status).toBe(200);
