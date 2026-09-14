@@ -6,7 +6,7 @@
  * parsed back out of it: the page then never has to unwrap a CDATA section to
  * find the html it is about to serve.
  */
-import { digestTtlSeconds, periodSuffix } from "../digest/period";
+import { digestCacheSuffix, digestTtlSeconds } from "../digest/period";
 import type { DigestRef } from "./digest-ref";
 
 /** What the page needs to render: the digest body and whose feed it is. */
@@ -17,7 +17,7 @@ export type DigestPage = {
 };
 
 export function digestPageKey(ref: DigestRef): string {
-  return `digest-html:${ref.hash}:${ref.date}:${ref.language}${periodSuffix(ref.period)}`;
+  return `digest-html:${ref.hash}:${ref.date}:${ref.language}${digestCacheSuffix(ref.period)}`;
 }
 
 /** Whether a value read back from KV is a record this module wrote. */

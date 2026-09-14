@@ -3,6 +3,13 @@ const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export type Clock = { now(): Date };
+export const systemClock: Clock = { now: () => new Date() };
+export function nowOf(clock: Clock = systemClock): Date { return clock.now(); }
+export function jstInstant(date: string, hour: number, minute = 0): Date {
+  return new Date(`${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+09:00`);
+}
+
 /** `YYYY-MM-DD` of the JST calendar day `now` falls on. */
 export function jstDate(now: Date = new Date()): string {
   return new Date(now.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);

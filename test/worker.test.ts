@@ -13,7 +13,7 @@ import { jstDate, previousDate } from "../src/time";
 // `cloudflare:test` types `env` as the (empty) `Cloudflare.Env`; KV comes from
 // wrangler.toml, while Workers AI is stubbed per test (it would call out to the
 // Cloudflare API otherwise).
-const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example" };
+const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example", PUBLIC_ORIGIN: "https://worker.example" };
 
 const FEED_ORIGIN = "https://source.example";
 const FEED_URL = `${FEED_ORIGIN}/rss.xml`;
@@ -91,7 +91,7 @@ async function storedDigest(
   const listed = await bindings.DIGEST_CACHE.list({
     prefix: `digest:${await sha256Hex(feedUrl)}:`,
   });
-  const key = listed.keys.map((entry) => entry.name).find((name) => name.endsWith(`:${language}`));
+  const key = listed.keys.map((entry) => entry.name).find((name) => name.endsWith(`:${language}:v2`) || name.endsWith(`:${language}:weekly`));
   if (!key) return null;
 
   return { key, value: (await bindings.DIGEST_CACHE.get(key)) ?? "" };
@@ -102,6 +102,12 @@ afterEach(async () => {
   vi.useRealTimers();
   // Storage is shared across tests in this pool; drop KV state between them.
   await reset();
+});
+
+beforeEach(() => {
+  // Keep relative feed fixtures inside the fixed 08:50–08:50 JST edition window.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-14T00:00:00Z"));
 });
 
 describe("routing", () => {
@@ -230,7 +236,7 @@ describe("GET /feed (cache miss)", () => {
     // The date itself is covered by the `jstDate` unit tests; asserting the
     // shape here keeps this test independent of when it runs.
     expect(cached?.key).toMatch(
-      new RegExp(`^digest:${await sha256Hex(FEED_URL)}:\\d{4}-\\d{2}-\\d{2}:en$`),
+      new RegExp(`^digest:${await sha256Hex(FEED_URL)}:\\d{4}-\\d{2}-\\d{2}:en:v2$`),
     );
     expect(cached?.value).toContain("- summary");
     expect(cached?.value).toContain("Daily Digest: Test Feed");
@@ -292,7 +298,7 @@ describe("GET /feed (cache miss)", () => {
     expect(run.mock.calls[0][0]).toBe("@cf/meta/llama-3.2-3b-instruct");
   });
 
-  it("skips the model call when nothing was published in the last 24 hours", async () => {
+  it("skips the model call when nothing was published in the covered window", async () => {
     const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toUTCString();
     stubFeedFetch(() => new Response(rssWithEntry(stale)));
     const { ai, run } = stubAi();
@@ -312,7 +318,7 @@ describe("GET /feed (cache miss)", () => {
     const body = await digestOf({ ...bindings, AI: ai, POST_NO_UPDATES: "true" });
 
     expect(body).toContain("<item>");
-    expect(body).toContain("No new entries were published in the last 24 hours.");
+    expect(body).toContain("No new entries were published in the covered daily window.");
     expect(run).not.toHaveBeenCalled();
   });
 });
@@ -351,7 +357,7 @@ describe("GET /feed (cache hit)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-10T03:00:00Z"));
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${previousDate(jstDate())}:en`;
+    const yesterdayKey = `digest:${await sha256Hex(FEED_URL)}:${previousDate(jstDate())}:en:v2`;
     await bindings.DIGEST_CACHE.put(yesterdayKey, "<rss>yesterday</rss>");
 
     const body = await (await callWorker({ ...bindings, AI: stubAi().ai })).text();
@@ -548,26 +554,27 @@ describe("GET /feed (JST day boundary)", () => {
     return keys.keys.map((entry) => entry.name).sort().at(-1) ?? "";
   }
 
-  it("switches the key at 15:00 UTC, not at midnight UTC", async () => {
+  it("switches the public key at 09:00 JST", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
 
-    const beforeBoundary = await keyWrittenAt("2026-09-10T14:59:59Z");
+    const beforeBoundary = await keyWrittenAt("2026-09-13T23:59:59Z");
     await reset();
-    const afterBoundary = await keyWrittenAt("2026-09-10T15:00:00Z");
+    const afterBoundary = await keyWrittenAt("2026-09-14T00:00:00Z");
 
-    expect(beforeBoundary).toContain(":2026-09-10:");
-    expect(afterBoundary).toContain(":2026-09-11:");
+    expect(beforeBoundary).toContain(":2026-09-13:");
+    expect(afterBoundary).toContain(":2026-09-14:");
   });
 
-  it("keeps one key across midnight UTC, which is 09:00 JST", async () => {
+  it("keeps one edition date before the publication boundary", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
 
-    const lateEvening = await keyWrittenAt("2026-09-10T23:50:00Z");
+    const beforePublication = await keyWrittenAt("2026-09-13T23:50:00Z");
     await reset();
-    const afterUtcMidnight = await keyWrittenAt("2026-09-11T00:10:00Z");
+    const afterPublication = await keyWrittenAt("2026-09-14T00:10:00Z");
 
-    expect(lateEvening).toContain(":2026-09-11:");
-    expect(afterUtcMidnight).toBe(lateEvening);
+    expect(beforePublication).toContain(":2026-09-13:");
+    expect(afterPublication).toContain(":2026-09-14:");
+    expect(afterPublication).not.toBe(beforePublication);
   });
 });
 
@@ -600,7 +607,7 @@ describe("GET /feed (language)", () => {
       `${WORKER_URL}&lang=ja`,
     );
 
-    expect(body).toContain("24 時間以内に公開された新しいエントリはありません。");
+    expect(body).toContain("対象の日次期間に公開された新しいエントリはありません。");
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -824,7 +831,7 @@ describe("scheduled", () => {
     expect(run).toHaveBeenCalledTimes(1);
     const stored = await storedDigest();
     expect(stored?.key).toBe(
-      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en`,
+      `digest:${await sha256Hex(FEED_URL)}:${jstDate(new Date(SCHEDULED_TIME))}:en:v2`,
     );
     expect(stored?.value).toContain("https://worker.example/digest/");
   });

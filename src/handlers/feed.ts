@@ -7,13 +7,14 @@ import {
 import { buildEmptyChannelXml } from "../digest/build";
 import { digestLinksOf, generateDigest } from "../digest/generate";
 import type { DigestLinks } from "../digest/types";
-import { type Env, maxSubscriptionsOf } from "../env";
+import { publicOriginOf, type Env, maxSubscriptionsOf } from "../env";
 import { isFeedRequestAuthorized } from "../feed/policy";
 import { register, touch, SubscriptionLimitError } from "../store/subscriptions";
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
-import { isDigestPeriod, periodDate, previousPeriodDate } from "../digest/period";
+import { isDigestPeriod, nextPublicationAt, previousPeriodDate, publishedPeriodDate, type DigestPeriod } from "../digest/period";
+import { nowOf, systemClock, type Clock } from "../time";
 import { FeedFetchError } from "../feed/fetch";
 import { WorkersAiError } from "../llm/workers-ai";
 
@@ -21,13 +22,16 @@ import { WorkersAiError } from "../llm/workers-ai";
  * Slack polls every 15-30 minutes, so five minutes of edge caching cuts
  * repeated origin hits without delaying a digest by a noticeable amount.
  */
-const XML_HEADERS = {
-  "content-type": "application/xml; charset=utf-8",
-  "cache-control": "public, max-age=300",
-};
+const XML_CONTENT_TYPE = "application/xml; charset=utf-8";
 
-function xmlResponse(xml: string): Response {
-  return new Response(xml, { headers: XML_HEADERS });
+function xmlResponse(xml: string, now: Date, period: DigestPeriod): Response {
+  const secondsUntilPublication = Math.max(0, Math.ceil((nextPublicationAt(now, period).getTime() - now.getTime()) / 1000));
+  return new Response(xml, {
+    headers: {
+      "content-type": XML_CONTENT_TYPE,
+      "cache-control": `public, max-age=${Math.min(300, secondsUntilPublication)}`,
+    },
+  });
 }
 
 /**
@@ -61,6 +65,7 @@ export async function handleFeed(
   env: Env,
   ctx: ExecutionContext,
   summarizer: Summarizer,
+  clock: Clock = systemClock,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
 
@@ -86,7 +91,7 @@ export async function handleFeed(
   if (!isDigestPeriod(period)) {
     return new Response("Unsupported period query parameter. Supported: daily, weekly", { status: 400 });
   }
-  const now = new Date();
+  const now = nowOf(clock);
 
   if (!isFeedRequestAuthorized(env, feedUrl, requestUrl.searchParams.get("token"))) {
     return new Response("Feed access forbidden", { status: 403 });
@@ -107,15 +112,15 @@ export async function handleFeed(
 
   const ref: DigestRef = {
     hash,
-    date: periodDate(now, period),
+    date: publishedPeriodDate(now, period),
     language,
     period,
   };
 
   const today = await getDigest(env.DIGEST_CACHE, ref);
-  if (today) return xmlResponse(today);
+  if (today) return xmlResponse(today, now, period);
 
-  const links = digestLinksOf(requestUrl.origin, ref);
+  const links = digestLinksOf(publicOriginOf(env) ?? requestUrl.origin, ref);
 
   // Today's digest is missing, so generate it in the background: the crawler
   // gets an answer within its timeout either way.
@@ -127,10 +132,12 @@ export async function handleFeed(
     ...ref,
     date: previousPeriodDate(ref.date, period),
   });
-  if (yesterday) return xmlResponse(yesterday);
+  if (yesterday) return xmlResponse(yesterday, now, period);
 
   return xmlResponse(
     buildEmptyChannelXml({ feedTitle: feedUrl.host, language: ref.language, period, links }),
+    now,
+    period,
   );
 }
 
