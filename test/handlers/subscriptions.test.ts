@@ -93,7 +93,7 @@ it("reports storage error types without leaking private feed credentials", async
   const cache = { async get() { throw new TypeError(`Cannot read ${secretFeed}`); } } as unknown as KVNamespace;
   const response = await crawl({ DIGEST_CACHE: cache }, undefined, secretFeed);
   expect(response.status).toBe(503);
-  expect(errors).toHaveBeenCalledWith("Failed to persist subscription (TypeError)");
+  expect(errors).toHaveBeenCalledWith(JSON.stringify({ event: "feed.error", stage: "subscription", code: "storage_failed" }));
   expect(JSON.stringify(errors.mock.calls)).not.toContain("private-secret");
   expect(fetch).not.toHaveBeenCalled();
   expect(summarize).not.toHaveBeenCalled();

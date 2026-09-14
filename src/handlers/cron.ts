@@ -71,7 +71,7 @@ export async function handleScheduled(
   if (!origin) {
     // Without it every link in the digest would point at nowhere, and the
     // digest is cached for two days: a run that cannot build them does nothing.
-    console.error("Skipped the scheduled run: PUBLIC_ORIGIN is unset or not an http url");
+    console.error(JSON.stringify({ event: "cron.error", stage: "config", code: "invalid_public_origin" }));
 
     return recordRun(env, trigger, { date, total: 0, ...tally, error: "invalid_public_origin", durationMs: Date.now() - startedAt });
   }
@@ -113,14 +113,14 @@ export async function handleScheduled(
     } catch (error) {
       if (error instanceof FeedFetchError && error.code === "policy") {
         tally.skipped += 1;
-        console.log(`Skipped subscription ${subscription.hash}: feed destination policy`);
+        console.log(JSON.stringify({ event: "cron.subscription", stage: "feed", code: "policy", hash: subscription.hash }));
         return;
       }
       tally.failed += 1;
       // The feed url may carry a token, so the feed is named by its hash: it
       // is what the digest keys use anyway.
-      const kind = error instanceof Error ? error.name : typeof error;
-      console.error(`Failed to generate digest for ${subscription.hash} (${kind})`);
+      const code = error instanceof FeedFetchError ? `feed_${error.code}` : "generation_failed";
+      console.error(JSON.stringify({ event: "cron.error", stage: "digest", code, hash: subscription.hash }));
     }
   });
 
@@ -197,7 +197,7 @@ async function recordRun(env: Env, trigger: CronTrigger, summary: CronRunSummary
   try {
     await putCronStatus(env.DIGEST_CACHE, { scheduledTime: trigger.scheduledTime, completedAt: Date.now(), summary });
   } catch (error) {
-    console.error("Failed to persist Cron health status");
+    console.error(JSON.stringify({ event: "cron.error", stage: "kv", code: "status_write_failed" }));
     throw error;
   }
   return summary;

@@ -20,6 +20,7 @@ import { isFeedDestinationAllowed } from "../feed/policy";
 import { parseFeed } from "../feed/parse";
 import { type EntrySelection, selectRecentEntries } from "../feed/select";
 import type { Summarizer } from "../llm/summarizer";
+import { WorkersAiError } from "../llm/workers-ai";
 import { getDigest, putDigest } from "../store/digest-cache";
 import { putDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
@@ -183,9 +184,11 @@ async function summarizeOrList(
 
     return html;
   } catch (error) {
-    // Keep the provider error for operational triage. The summarizer receives
-    // feed content, but provider errors do not contain the original prompt.
-    console.error(`Failed to summarize ${selection.entries.length} entries`, error);
+    console.error(JSON.stringify({
+      event: "digest.error", stage: "ai",
+      code: error instanceof WorkersAiError ? error.code : "failed",
+      count: selection.entries.length,
+    }));
 
     return renderEntryListHtml(selection.entries, language, period);
   }
@@ -258,9 +261,8 @@ async function writeWithDeadline<T>(
   }
 }
 
-function logReleaseFailure(ref: DigestRef, error: unknown): void {
-  const kind = error instanceof Error ? error.name : typeof error;
-  console.error(`Failed to release generation lock for ${ref.hash} (${kind})`);
+function logReleaseFailure(ref: DigestRef, _error: unknown): void {
+  console.error(JSON.stringify({ event: "digest.error", stage: "kv", code: "lock_release_failed", hash: ref.hash }));
 }
 
 /**

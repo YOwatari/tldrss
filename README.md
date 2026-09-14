@@ -63,7 +63,7 @@ attempts. Feed timeout/size failures are not retried; a later crawl or Cron
 run can try again, while the HTTP path continues serving the previous digest
 or an empty RSS channel immediately.
 
-Upstream and model failures are logged and answered with 200, never with an error status, so a reader does not show the subscription as broken. A `generating:{...}` key (TTL 5 minutes) makes concurrent requests unlikely to generate the same digest twice; KV has no compare-and-set and is only eventually consistent across isolates, so this reduces duplicate work rather than ruling it out.
+Upstream and model failures are logged and answered with 200, never with an error status, so a reader does not show the subscription as broken. Operational error logs are JSON and contain only a processing `stage`, stable `code`, safe counts, and the subscription/digest hash where applicable; feed URLs, query tokens, prompts, model responses, and exception objects are excluded. A `generating:{...}` key (TTL 5 minutes) makes concurrent requests unlikely to generate the same digest twice; KV has no compare-and-set and is only eventually consistent across isolates, so this reduces duplicate work rather than ruling it out.
 
 ### Scheduled pre-generation
 A cron trigger runs at 08:50 JST (`50 23 * * *` in UTC, the schedule Cloudflare reads) and generates the day's digest for every subscription, so the 09:00 crawl is served straight from KV.

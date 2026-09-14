@@ -14,6 +14,8 @@ import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
 import type { DigestRef } from "../store/digest-ref";
 import { isDigestPeriod, periodDate, previousPeriodDate } from "../digest/period";
+import { FeedFetchError } from "../feed/fetch";
+import { WorkersAiError } from "../llm/workers-ai";
 
 /**
  * Slack polls every 15-30 minutes, so five minutes of edge caching cuts
@@ -99,9 +101,7 @@ export async function handleFeed(
     if (error instanceof SubscriptionLimitError) {
       return new Response("Subscription limit reached", { status: 429 });
     }
-    // Error messages may contain a private feed URL; log the error class only.
-    const kind = error instanceof Error ? error.name : typeof error;
-    console.error(`Failed to persist subscription (${kind})`);
+    console.error(JSON.stringify({ event: "feed.error", stage: "subscription", code: "storage_failed" }));
     return new Response("Subscription storage unavailable", { status: 503 });
   }
 
@@ -151,9 +151,8 @@ async function generateInBackground(
   try {
     await generateDigest({ env, summarizer, ref, feedUrl, links, trackCleanup });
   } catch (error) {
-    // Private feed URLs carry credentials in the query string, so only the
-    // origin and the error class are logged.
-    const kind = error instanceof Error ? error.name : typeof error;
-    console.error(`Failed to build digest for ${feedUrl.origin} (${kind})`);
+    const stage = error instanceof FeedFetchError ? "feed" : error instanceof WorkersAiError ? "ai" : "digest";
+    const code = error instanceof FeedFetchError ? `feed_${error.code}` : error instanceof WorkersAiError ? error.code : "generation_failed";
+    console.error(JSON.stringify({ event: "feed.error", stage, code, hash: ref.hash }));
   }
 }
