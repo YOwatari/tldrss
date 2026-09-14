@@ -154,7 +154,7 @@ Workers AI has no local emulation, so tests inject a stub `AI` binding and `remo
 
 ## Slack subscriptions and access controls
 
-Any HTTP(S) feed URL is accepted by default. To restrict the service, optionally set `ALLOWED_FEED_HOSTS` in `wrangler.toml` to a comma-separated list of exact feed hostnames, for example `"example.com,feeds.example.org"`. Host matching ignores case and surrounding spaces; subdomains are not implicitly allowed. These are hostnames, without a scheme, path, or port. `MAX_SUBSCRIPTIONS` defaults to 20.
+Any public HTTP(S) feed URL using the default port is accepted by default. Local/private IP destinations, localhost names, non-default ports, and non-HTTP(S) schemes are rejected. Redirects are followed manually and each target is checked by the same policy, with at most five redirects. To restrict the service further, optionally set `ALLOWED_FEED_HOSTS` in `wrangler.toml` to a comma-separated list of exact feed hostnames, for example `"example.com,feeds.example.org"`. Host matching ignores case and surrounding spaces; subdomains are not implicitly allowed. These are hostnames, without a scheme, path, or port. `MAX_SUBSCRIPTIONS` defaults to 20. The runtime can reject literal private/local addresses; it cannot prove that an arbitrary public hostname will never resolve differently, so DNS-level changes remain outside this application policy.
 
 Alternatively, or additionally, set a shared secret:
 
@@ -198,7 +198,7 @@ key disappears after eight days without another crawl.
 Slack's official setup requires installing the RSS app and selecting a channel
 for the feed. Validate the URL with the W3C feed validator if Slack rejects it.
 
-The cap uses KV listing and serializes registrations within one isolate. KV is eventually consistent and has no atomic compare-and-set, so simultaneous registrations across isolates can temporarily exceed the cap. Separate `sub:{hash}` keys ensure concurrent registration of different feeds does not overwrite subscriptions. Host restrictions apply to the requested feed hostname; they are not a network firewall for upstream redirects.
+The cap uses KV listing and serializes registrations within one isolate. KV is eventually consistent and has no atomic compare-and-set, so simultaneous registrations across isolates can temporarily exceed the cap. Separate `sub:{hash}` keys ensure concurrent registration of different feeds does not overwrite subscriptions. The token authenticates the caller; it does not widen the destination policy. Host restrictions are applied to the initial URL and every redirect. Cron re-checks stored subscriptions at run time, so changing `ALLOWED_FEED_HOSTS` safely skips subscriptions that are no longer permitted. The skip log contains only the subscription hash and a generic reason; no feed URL or token is recorded. Other subscriptions continue, and rejected destinations never reach XML parsing or AI.
 
 ### Daily KV write estimate
 

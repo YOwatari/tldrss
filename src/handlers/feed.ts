@@ -7,7 +7,8 @@ import {
 import { buildEmptyChannelXml } from "../digest/build";
 import { digestLinksOf, generateDigest } from "../digest/generate";
 import type { DigestLinks } from "../digest/types";
-import { type Env, isFeedAllowed, maxSubscriptionsOf } from "../env";
+import { type Env, maxSubscriptionsOf } from "../env";
+import { isFeedRequestAuthorized } from "../feed/policy";
 import { register, touch, SubscriptionLimitError } from "../store/subscriptions";
 import type { Summarizer } from "../llm/summarizer";
 import { getDigest } from "../store/digest-cache";
@@ -85,7 +86,7 @@ export async function handleFeed(
   }
   const now = new Date();
 
-  if (!isFeedAllowed(env, feedUrl, requestUrl.searchParams.get("token"))) {
+  if (!isFeedRequestAuthorized(env, feedUrl, requestUrl.searchParams.get("token"))) {
     return new Response("Feed access forbidden", { status: 403 });
   }
 

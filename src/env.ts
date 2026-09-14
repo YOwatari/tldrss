@@ -1,4 +1,5 @@
 import { DEFAULT_MAX_ENTRIES } from "./feed/select";
+import { isFeedRequestAuthorized } from "./feed/policy";
 
 export type Env = {
   DIGEST_CACHE: KVNamespace;
@@ -124,9 +125,7 @@ export function maxSubscriptionsOf(env: Env): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 20;
 }
 
-/** Allow any HTTP(S) feed unless an optional hostname or token restriction is configured. */
+/** @deprecated Kept for callers of the old combined auth/policy helper. */
 export function isFeedAllowed(env: Env, feed: URL, token: string | null): boolean {
-  const hosts = (env.ALLOWED_FEED_HOSTS ?? "").split(",").map(host => host.trim().toLowerCase()).filter(Boolean);
-  if (hosts.length && !hosts.includes(feed.hostname.toLowerCase())) return false;
-  return !env.FEED_TOKEN || token === env.FEED_TOKEN;
+  return isFeedRequestAuthorized(env, feed, token);
 }

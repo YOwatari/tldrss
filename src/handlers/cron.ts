@@ -15,6 +15,8 @@ import { putCronStatus, type CronRunSummary } from "../store/cron-status";
 import { getSubscription, listSubscriptions, remove, SUBSCRIPTION_TTL_SECONDS, type SubscriptionEntry } from "../store/subscriptions";
 import { jstDate } from "../time";
 import { periodDate } from "../digest/period";
+import { FeedFetchError } from "../feed/fetch";
+import { isFeedDestinationAllowed } from "../feed/policy";
 
 /**
  * How many feeds are generated at once.
@@ -109,6 +111,11 @@ export async function handleScheduled(
       if (outcome === "generated") tally.generated += 1;
       else tally.skipped += 1;
     } catch (error) {
+      if (error instanceof FeedFetchError && error.code === "policy") {
+        tally.skipped += 1;
+        console.log(`Skipped subscription ${subscription.hash}: feed destination policy`);
+        return;
+      }
       tally.failed += 1;
       // The feed url may carry a token, so the feed is named by its hash: it
       // is what the digest keys use anyway.
@@ -135,6 +142,10 @@ function generateFor(
   subscription: SubscriptionEntry,
   run: { origin: string; now: Date; trackCleanup?: (promise: Promise<void>) => void },
 ): Promise<GenerationOutcome> {
+  const feedUrl = new URL(subscription.url);
+  if (!isFeedDestinationAllowed(env, feedUrl)) {
+    return Promise.reject(new FeedFetchError("Feed destination is not allowed", "policy"));
+  }
   const ref: DigestRef = {
     hash: subscription.hash,
     date: periodDate(run.now, subscription.period),
@@ -146,7 +157,7 @@ function generateFor(
     env,
     summarizer,
     ref,
-    feedUrl: new URL(subscription.url),
+    feedUrl,
     links: digestLinksOf(run.origin, ref),
     now: run.now,
     trackCleanup: run.trackCleanup,

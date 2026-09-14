@@ -193,6 +193,21 @@ describe("handleScheduled", () => {
     await expect(digestOf(healthy)).resolves.toContain("<rss");
   });
 
+  it("skips stored subscriptions made forbidden by changed host policy", async () => {
+    const forbidden = "https://old.example/rss.xml";
+    const allowed = "https://new.example/rss.xml";
+    const [forbiddenHash] = await register(forbidden, allowed);
+    const fetched = stubFeedFetch();
+    const summarizer = fakeSummarizer();
+
+    const summary = await run(envWith({ ALLOWED_FEED_HOSTS: "new.example" }), summarizer);
+
+    expect(summary).toMatchObject({ total: 2, generated: 1, skipped: 1, failed: 0 });
+    expect(fetched).toEqual([allowed]);
+    expect(summarizer.calls).toHaveLength(1);
+    expect(await digestOf(forbiddenHash)).toBeNull();
+  });
+
   it("does not let a feed that stops after headers block the other Cron feeds", async () => {
     const slow = "https://slow.example/rss.xml";
     const healthy = "https://healthy.example/rss.xml";
