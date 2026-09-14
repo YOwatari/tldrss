@@ -1,4 +1,6 @@
 /** Errors raised while acquiring an upstream feed. */
+import { MAX_FEED_REDIRECTS } from "./policy";
+
 export class FeedFetchError extends Error {
   constructor(message: string, readonly code: "timeout" | "too_large" | "http" | "body" | "policy" | "redirect") {
     super(message);
@@ -31,8 +33,9 @@ export async function fetchFeed(url: URL, options: FeedFetcherOptions): Promise<
     let response: Response;
     let currentUrl = new URL(url.toString());
     const isAllowed = options.isAllowed ?? (() => true);
-    const maxRedirects = options.maxRedirects ?? 5;
+    const maxRedirects = options.maxRedirects ?? MAX_FEED_REDIRECTS;
     for (let redirectCount = 0; ; redirectCount += 1) {
+      if (remaining() <= 0) throw new FeedFetchError("Upstream feed timed out", "timeout");
       if (!isAllowed(currentUrl)) throw new FeedFetchError("Feed destination is not allowed", "policy");
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -56,6 +59,7 @@ export async function fetchFeed(url: URL, options: FeedFetcherOptions): Promise<
       const location = response.headers.get("location");
       if (!location) throw new FeedFetchError("Feed redirect did not provide a location", "redirect");
       if (redirectCount >= maxRedirects) throw new FeedFetchError("Feed redirected too many times", "redirect");
+      if (response.body) await response.body.cancel("following feed redirect");
       try {
         currentUrl = new URL(location, currentUrl);
       } catch {
