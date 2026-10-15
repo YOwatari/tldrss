@@ -18,7 +18,7 @@ const BULLET_PATTERN = /^\s*(?:[-*•]\s*)?\[(\d+)\]\s*(.+)$/;
  * Escapes text for HTML. `escapeXml` in `rss.ts` serves a different layer: the
  * digest body is HTML nested inside an XML element, so it is escaped twice.
  */
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
