@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeLlmHtml } from "../../src/llm/sanitize";
+import { plainTextOf, sanitizeLlmHtml } from "../../src/llm/sanitize";
 
 describe("sanitizeLlmHtml (allowed markup)", () => {
   it("keeps the tags the prompt asks for", () => {
@@ -195,5 +195,30 @@ describe("sanitizeLlmHtml (well-formedness)", () => {
 
   it("closes the tags left open inside one the model did close", () => {
     expect(sanitizeLlmHtml("<ul><li>One</ul>")).toBe("<ul><li>One</li></ul>");
+  });
+});
+
+describe("plainTextOf", () => {
+  it("returns a plain line as it is", () => {
+    expect(plainTextOf("Something shipped.")).toBe("Something shipped.");
+  });
+  it("separates the words of adjacent blocks and line breaks", () => {
+    expect(plainTextOf("<p>New SDK</p><p>Security fixes</p>")).toBe("New SDK Security fixes");
+    expect(plainTextOf("One<br>Two<br/>Three")).toBe("One Two Three");
+  });
+  it("drops tags but keeps the text they wrapped", () => {
+    expect(plainTextOf("<p>Hello <strong>world</strong></p>")).toBe("Hello world");
+  });
+  it("removes a script element along with its content", () => {
+    expect(plainTextOf("a<script>alert(1)</script>b")).toBe("ab");
+  });
+  it("removes comments and code fences", () => {
+    expect(plainTextOf("```html\n<!-- x -->Done\n```")).toBe("Done");
+  });
+  it("decodes entities so the renderer escapes them only once", () => {
+    expect(plainTextOf("AT&amp;T &lt;3")).toBe("AT&T <3");
+  });
+  it("joins lines and collapses whitespace into single spaces", () => {
+    expect(plainTextOf("  First.\n\n  Second.  ")).toBe("First. Second.");
   });
 });

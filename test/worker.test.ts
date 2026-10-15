@@ -79,6 +79,16 @@ async function digestOf(env: Env, url = WORKER_URL): Promise<string> {
 
 const hourAgo = () => new Date(Date.now() - 60 * 60 * 1000);
 
+/** The address the digest item points readers at. */
+function pageUrlOf(xml: string): string {
+  const link = /<item>[\s\S]*?<link>([^<]+)<\/link>/.exec(xml)?.[1];
+  if (!link) throw new Error("The digest carried no item link");
+  return link;
+}
+
+/** The html Slack posts under the item title. */
+const descriptionOf = (xml: string) => /<item>[\s\S]*?<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/.exec(xml)?.[1] ?? "";
+
 /**
  * The digest KV entry for a feed, looked up by hash prefix rather than by a
  * key rebuilt from the wall clock: recomputing the date here would disagree
@@ -461,9 +471,10 @@ describe("GET /feed (upstream failures)", () => {
     // The first request predates the digest, so the fallback shows up in KV.
     expect(response.status).toBe(200);
     const stored = await storedDigest();
-    expect(stored?.value).toContain("A summary could not be generated");
-    expect(stored?.value).toContain(`${FEED_ORIGIN}/1`);
-    expect(stored?.value).toContain("Entry 1");
+    expect(stored?.value).not.toContain(`${FEED_ORIGIN}/1`);
+    expect(descriptionOf(stored?.value ?? "")).toBe(
+      "<p>A summary could not be generated, so today's entries are listed below.</p><ul><li>Entry 1</li></ul>",
+    );
     expect(JSON.parse(String(errors.mock.calls[0][0]))).toEqual({
       event: "digest.error", stage: "ai", code: "provider", count: 1,
     });
@@ -644,35 +655,65 @@ describe("GET /feed (language)", () => {
   });
 });
 
-describe("GET /feed (article links)", () => {
+describe("GET /digest (article links)", () => {
   it("heads each bullet with a link to the article it summarizes", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
 
-    const body = await digestOf({ ...bindings, AI: stubAi("[1] It shipped.").ai });
+    const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    // The body travels as CDATA, so the anchor reaches the reader as markup.
-    expect(body).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
-    expect(body).toContain("It shipped.");
+    expect(page).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
+    expect(page).toContain("It shipped.");
   });
 
   it("drops a bullet citing an entry that does not exist", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("[1] It shipped.\n[7] Invented.").ai };
 
-    const body = await digestOf({
-      ...bindings,
-      AI: stubAi("[1] It shipped.\n[7] Invented.").ai,
-    });
+    const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    expect(body).toContain("It shipped.");
-    expect(body).not.toContain("Invented.");
+    expect(page).toContain("It shipped.");
+    expect(page).not.toContain("Invented.");
   });
 
   it("keeps the model's text rather than serving an empty digest", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("[7] Invented.").ai };
 
-    const body = await digestOf({ ...bindings, AI: stubAi("[7] Invented.").ai });
+    const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    expect(body).toContain("Invented.");
+    expect(page).toContain("Invented.");
+  });
+});
+
+describe("GET /feed (description)", () => {
+  it("posts the lead and titles without links or urls", async () => {
+    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
+
+    const body = await digestOf({ ...bindings, AI: stubAi("A busy day.\n[1] It shipped.").ai });
+
+    expect(descriptionOf(body)).toBe("<p>A busy day.</p><ul><li>Entry 1</li></ul>");
+  });
+
+  it.each(["en", "ja"])("fits a day with many entries into DESCRIPTION_MAX_CHARS and counts the rest (lang=%s)", async (lang) => {
+    stubFeedFetch(() => new Response(rssWithEntries(60, hourAgo().toUTCString())));
+
+    const body = await digestOf({ ...bindings, AI: stubAi("Lead.\n[1] x").ai }, `${WORKER_URL}&lang=${lang}`);
+    const description = descriptionOf(body);
+    const listed = [...description.matchAll(/<li>/g)].length;
+
+    expect(description.length).toBeLessThanOrEqual(450);
+    expect(description).not.toMatch(/<a\b|https?:\/\//i);
+    // N also counts the 30 entries MAX_ENTRIES cut before rendering
+    expect(description).toContain(lang === "ja" ? `…ほか ${60 - listed} 件` : `…and ${60 - listed} more`);
+  });
+
+  it("honours a configured DESCRIPTION_MAX_CHARS", async () => {
+    stubFeedFetch(() => new Response(rssWithEntries(10, hourAgo().toUTCString())));
+
+    const body = await digestOf({ ...bindings, AI: stubAi("Lead.\n[1] x").ai, DESCRIPTION_MAX_CHARS: "120" });
+
+    expect(descriptionOf(body).length).toBeLessThanOrEqual(120);
   });
 });
 
@@ -739,13 +780,6 @@ describe("GET /feed (untitled entries)", () => {
 });
 
 describe("GET /digest/{hash}/{date}", () => {
-  /** The address the digest item points readers at. */
-  function pageUrlOf(xml: string): string {
-    const link = /<item>[\s\S]*?<link>([^<]+)<\/link>/.exec(xml)?.[1];
-    if (!link) throw new Error("The digest carried no item link");
-    return link;
-  }
-
   it("serves the full digest behind the link the item carries", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };

@@ -4,7 +4,7 @@
  */
 import type { FeedEntry } from "../feed/parse";
 import type { DigestPeriod } from "./period";
-import { sanitizeLlmHtml } from "../llm/sanitize";
+import { plainTextOf, sanitizeLlmHtml } from "../llm/sanitize";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
 import { summaryUnavailableText, untitledEntryText } from "./text";
 
@@ -18,12 +18,26 @@ const BULLET_PATTERN = /^\s*(?:[-*•]\s*)?\[(\d+)\]\s*(.+)$/;
  * Escapes text for HTML. `escapeXml` in `rss.ts` serves a different layer: the
  * digest body is HTML nested inside an XML element, so it is escaped twice.
  */
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/**
+ * The prose before the first bullet, as plain text.
+ *
+ * Kept apart from `resolveBullets`: that needs entries to resolve numbers,
+ * which the lead has no use for. With no bullet at all the whole answer is
+ * the lead, so a day the model ignored the format still gives Slack something.
+ */
+export function leadOf(summary: string): string {
+  const lines = summary.split("\n");
+  const firstBullet = lines.findIndex((line) => BULLET_PATTERN.test(line));
+
+  return plainTextOf(firstBullet === -1 ? summary : lines.slice(0, firstBullet).join("\n"));
 }
 
 /**

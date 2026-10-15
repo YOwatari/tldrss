@@ -22,10 +22,18 @@ export type Digest = {
   publishAt: string;
   /** Title the source feed gave itself, or its host. */
   feedTitle: string;
-  /** Digest body as a sanitized HTML fragment; see `renderDigestHtml`. */
+  /**
+   * Body of the full-text page, as a sanitized HTML fragment; see
+   * `renderDigestHtml`. Not used for the RSS item: that is rendered from
+   * `lead` and `entries` so it stays within Slack's length and carries no link.
+   */
   html: string;
+  /** The prose opening the digest, as plain text: no markup, no links. */
+  lead: string;
   /** The entries the body was built from, newest first. */
   entries: FeedEntry[];
+  /** How many entries the period had before the cap; at least `entries.length`. */
+  availableCount: number;
 };
 
 /** The reader-facing addresses of a digest. Neither carries the feed url. */

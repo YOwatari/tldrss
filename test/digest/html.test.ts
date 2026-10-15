@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderDigestHtml, renderEntryListHtml } from "../../src/digest/html";
+import { leadOf, renderDigestHtml, renderEntryListHtml } from "../../src/digest/html";
 
 const entries = [
   { title: "First article", link: "https://example.com/1" },
@@ -239,5 +239,26 @@ describe("renderEntryListHtml", () => {
 
   it("renders the notice alone when there is nothing to list", () => {
     expect(renderEntryListHtml([])).not.toContain("<ul>");
+  });
+});
+
+describe("leadOf", () => {
+  it("takes the text before the first bullet", () => {
+    expect(leadOf("A busy day.\n[1] It shipped.")).toBe("A busy day.");
+  });
+  it("joins a multi-line lead with spaces", () => {
+    expect(leadOf("First.\nSecond.\n\n[1] It shipped.")).toBe("First. Second.");
+  });
+  it("ignores text after the bullets", () => {
+    expect(leadOf("Lead.\n[1] It shipped.\nThanks for reading.")).toBe("Lead.");
+  });
+  it("is empty when the answer opens with a bullet", () => {
+    expect(leadOf("[1] It shipped.")).toBe("");
+  });
+  it("uses the whole answer when the model wrote no bullet", () => {
+    expect(leadOf("- summary\nmore")).toBe("- summary more");
+  });
+  it("reduces markup in the lead to plain text", () => {
+    expect(leadOf("<p>Big <b>day</b></p>\n[1] x")).toBe("Big day");
   });
 });

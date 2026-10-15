@@ -2,10 +2,15 @@ import { type Env, isFeedAllowed, maxSubscriptionsOf } from "../src/env";
 import { describe, expect, it } from "vitest";
 import {
   MAX_ENTRIES_CEILING,
+  descriptionMaxCharsOf,
   maxEntriesOf,
   publicOriginOf,
   shouldPostNoUpdates,
 } from "../src/env";
+import {
+  DEFAULT_DESCRIPTION_MAX_CHARS,
+  MIN_DESCRIPTION_MAX_CHARS,
+} from "../src/digest/description";
 import { DEFAULT_MAX_ENTRIES } from "../src/feed/select";
 
 function envWith(maxEntries: unknown) {
@@ -34,6 +39,36 @@ describe("maxEntriesOf", () => {
 
   it("clamps a cap above the ceiling", () => {
     expect(maxEntriesOf(envWith(`${MAX_ENTRIES_CEILING + 50}`))).toBe(MAX_ENTRIES_CEILING);
+  });
+});
+
+describe("descriptionMaxCharsOf", () => {
+  it("falls back to the default when DESCRIPTION_MAX_CHARS is unset", () => {
+    expect(descriptionMaxCharsOf({} as never)).toBe(DEFAULT_DESCRIPTION_MAX_CHARS);
+  });
+
+  it("reads the configured limit, as a string or a number", () => {
+    expect(descriptionMaxCharsOf({ DESCRIPTION_MAX_CHARS: "300" } as never)).toBe(300);
+    expect(descriptionMaxCharsOf({ DESCRIPTION_MAX_CHARS: 300 } as never)).toBe(300);
+  });
+
+  it.each(["0", "-1", "1.5", "abc", "", " "])(
+    "falls back to the default for the unusable value %o",
+    (value) => {
+      expect(descriptionMaxCharsOf({ DESCRIPTION_MAX_CHARS: value } as never)).toBe(
+        DEFAULT_DESCRIPTION_MAX_CHARS,
+      );
+    },
+  );
+
+  it("raises a limit below the floor to the floor", () => {
+    expect(descriptionMaxCharsOf({ DESCRIPTION_MAX_CHARS: "10" } as never)).toBe(
+      MIN_DESCRIPTION_MAX_CHARS,
+    );
+  });
+
+  it("does not cap a large limit", () => {
+    expect(descriptionMaxCharsOf({ DESCRIPTION_MAX_CHARS: "100000" } as never)).toBe(100000);
   });
 });
 

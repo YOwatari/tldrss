@@ -31,7 +31,21 @@ const DECLARATION_PATTERN = /<!--[\s\S]*?(?:-->|$)|<![^>]*>?/g;
 /** ```` ```html ```` and its bare form, which models wrap answers in. */
 const CODE_FENCE_PATTERN = /```[a-zA-Z]*/g;
 
+function withoutNonMarkup(raw: string): string {
+  return raw
+    .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
+    .replace(RAW_TEXT_PATTERN, "")
+    .replace(DECLARATION_PATTERN, "")
+    .replace(CODE_FENCE_PATTERN, "");
+}
+
 /** One tag, tolerating quoted attribute values that contain `>`. */
+const BLOCK_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt", "figcaption", "figure",
+  "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre",
+  "section", "table", "td", "th", "tr", "ul",
+]);
+
 const TAG_PATTERN = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>?/g;
 
 const HREF_PATTERN = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
@@ -137,11 +151,7 @@ export type SanitizeOptions = {
 };
 
 export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): string {
-  const source = raw
-    .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
-    .replace(RAW_TEXT_PATTERN, "")
-    .replace(DECLARATION_PATTERN, "")
-    .replace(CODE_FENCE_PATTERN, "");
+  const source = withoutNonMarkup(raw);
 
   const allowed = new Set(
     [...(options.allowedHrefs ?? [])]
@@ -182,4 +192,21 @@ export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): str
   parts.push(open.reverse().map((tag) => `</${tag}>`).join(""));
 
   return parts.join("").trim();
+}
+
+/**
+ * The model's answer as one line of plain text, for places that cannot carry
+ * markup. Entities are decoded because the renderer escapes the text again;
+ * leaving them encoded would show `&amp;` to the reader.
+ */
+export function plainTextOf(raw: string): string {
+  // Block boundaries become a space so that adjacent paragraphs do not fuse
+  // into one word, which would also let url removal swallow the next word.
+  // Inline tags are dropped without one, so `<strong>a</strong>b` stays `ab`.
+  const text = withoutNonMarkup(raw).replace(TAG_PATTERN, (_match, _closing, name: string) =>
+    BLOCK_TAGS.has(name.toLowerCase()) ? " " : "",
+  );
+  return decodeHtmlEntities(text)
+    .replace(/\s+/g, " ")
+    .trim();
 }

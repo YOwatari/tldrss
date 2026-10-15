@@ -40,6 +40,7 @@ it("registers both periods and serves the same weekly edition through Cron and c
   const xml = await getDigest(env.DIGEST_CACHE, ref);
   expect(xml).toContain("Weekly Digest: Feed");
   expect(xml).toContain(`${daily.hash}-${date}-en-weekly`);
+  expect(xml).toContain("<description><![CDATA[<ul><li>Article</li></ul>]]></description>");
   const page = await handleDigestPage(new Request(digestLinksOf(env.PUBLIC_ORIGIN!, ref).pageUrl), env);
   expect(page.status).toBe(200);
   expect(await page.text()).toContain("Weekly Digest: Feed");

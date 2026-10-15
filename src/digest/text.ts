@@ -23,6 +23,11 @@ export function untitledEntryText(language: DigestLanguage = DEFAULT_LANGUAGE): 
   return TEXT[language].untitledEntry;
 }
 
+/** Closing line saying how many entries the digest left unlisted. */
+export function moreEntriesText(count: number, language: DigestLanguage = DEFAULT_LANGUAGE): string {
+  return language === "ja" ? `…ほか ${count} 件` : `…and ${count} more`;
+}
+
 /** Digest body for a feed with nothing recent enough to summarize. */
 export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE, period: DigestPeriod = "daily"): string {
   if (period === "weekly") return language === "ja" ? "対象の週に公開された新しいエントリはありません。" : "No new entries were published in the covered week.";
