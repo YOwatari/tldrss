@@ -9,12 +9,12 @@
  * lives here rather than in either handler.
  */
 import { buildDigestXml, buildEmptyChannelXml } from "./build";
-import { renderDigestHtml, renderEntryListHtml } from "./html";
+import { leadOf, renderDigestHtml, renderEntryListHtml } from "./html";
 import type { DigestLanguage } from "./language";
 import { editionOf, periodWindow, type DigestPeriod } from "./period";
-import { noRecentEntriesText } from "./text";
+import { noRecentEntriesText, summaryUnavailableText } from "./text";
 import type { Digest, DigestLinks } from "./types";
-import { feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
+import { descriptionMaxCharsOf, feedTimeoutMsOf, generationTimeoutMsOf, maxEntriesOf, maxFeedBytesOf, type Env, shouldPostNoUpdates } from "../env";
 import { fetchFeed } from "../feed/fetch";
 import { isFeedDestinationAllowed } from "../feed/policy";
 import { parseFeed } from "../feed/parse";
@@ -145,7 +145,7 @@ async function boundedCleanup(
 }
 
 /**
- * The digest body: the model's summary, or the day's entries as bare links
+ * The digest body and its lead: the model's summary, or the day's entries as bare links
  * when summarizing failed.
  *
  * Only the summary is given up on. Titles and links are already in hand, and
@@ -161,7 +161,7 @@ async function summarizeOrList(
   language: DigestLanguage,
   period: DigestPeriod = "daily",
   deadlineAt: number,
-): Promise<string> {
+): Promise<{ html: string; lead: string }> {
   try {
     const summary = await withinDeadline(summarizer.summarize({
       feedTitle,
@@ -178,7 +178,9 @@ async function summarizeOrList(
     // entry list, so it is treated as a failure to summarize.
     if (html.trim() === "") throw new Error("Digest body was empty after rendering");
 
-    return html;
+    // An empty lead (the answer opened with a bullet) is kept as is: Slack
+    // then gets the titles alone, which beats the fallback's apology.
+    return { html, lead: leadOf(summary) };
   } catch (error) {
     console.error(JSON.stringify({
       event: "digest.error", stage: "ai",
@@ -186,7 +188,10 @@ async function summarizeOrList(
       count: selection.entries.length,
     }));
 
-    return renderEntryListHtml(selection.entries, language, period);
+    return {
+      html: renderEntryListHtml(selection.entries, language, period),
+      lead: summaryUnavailableText(language, period),
+    };
   }
 }
 
@@ -237,7 +242,7 @@ async function storeDigest(
     html: digest.html,
   }), deadlineAt, "digest page storage", storage);
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
-  await writeWithDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links })), deadlineAt, "digest storage", storage);
+  await writeWithDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links, descriptionMaxChars: descriptionMaxCharsOf(env) })), deadlineAt, "digest storage", storage);
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded after storage");
 }
 
@@ -307,10 +312,20 @@ async function buildDigest(
     end: window.end,
   });
 
-  const html =
+  const body =
     selection.entries.length === 0
-      ? renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language)
+      ? {
+          html: renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language),
+          lead: noRecentEntriesText(ref.language, ref.period),
+        }
       : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
-  return { ...ref, ...editionOf(ref.date, ref.period), feedTitle, html, entries: selection.entries };
+  return {
+    ...ref,
+    ...editionOf(ref.date, ref.period),
+    feedTitle,
+    ...body,
+    entries: selection.entries,
+    availableCount: selection.availableCount,
+  };
 }

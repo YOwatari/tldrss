@@ -6,6 +6,7 @@
  * per feed, its guid stable for the day, its `<pubDate>` fixed to the JST
  * morning rather than to whenever generation finished.
  */
+import { DEFAULT_DESCRIPTION_MAX_CHARS, renderDescriptionHtml } from "./description";
 import { channelTitleText, channelDescriptionText, itemTitleText } from "./text";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
 import type { Digest, DigestLinks } from "./types";
@@ -68,6 +69,7 @@ export function buildDigestXml(params: {
   digest: Digest;
   links: DigestLinks;
   now?: Date;
+  descriptionMaxChars?: number;
 }): string {
   const { digest, links } = params;
   const now = params.now ?? new Date();
@@ -89,7 +91,13 @@ export function buildDigestXml(params: {
       <link>${escapeXml(links.pageUrl)}</link>
       <guid isPermaLink="false">${escapeXml(guid)}</guid>
       <pubDate>${digestPubDate(digest.date)}</pubDate>
-      <description>${cdata(digest.html)}</description>
+      <description>${cdata(renderDescriptionHtml({
+        lead: digest.lead,
+        entries: digest.entries,
+        availableCount: digest.availableCount,
+        language: digest.language,
+        maxChars: params.descriptionMaxChars ?? DEFAULT_DESCRIPTION_MAX_CHARS,
+      }))}</description>
     </item>
 ${CHANNEL_TAIL}`;
 }

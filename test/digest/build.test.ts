@@ -22,7 +22,9 @@ function digestOf(overrides: Partial<Digest> = {}): Digest {
     publishAt: "2026-09-11T00:00:00.000Z",
     feedTitle: "Example Feed",
     html: "<p>Something shipped.</p>",
+    lead: "Something shipped.",
     entries: [{ title: "Entry 1", link: "https://source.example/1" }],
+    availableCount: 1,
     ...overrides,
   };
 }
@@ -86,20 +88,42 @@ describe("buildDigestXml", () => {
     expect(parse(xml).channel.item.link).toBe(LINKS.pageUrl);
   });
 
-  it("carries the body as CDATA, so the reader receives html rather than text", () => {
+  it("describes the item with the lead and the titles, as html in CDATA", () => {
     const xml = buildDigestXml({ digest: digestOf(), links: LINKS, now: NOW });
 
-    expect(xml).toContain("<![CDATA[<p>Something shipped.</p>]]>");
-    expect(xml).not.toContain("&lt;p&gt;");
+    expect(xml).toContain("<description><![CDATA[<p>Something shipped.</p><ul><li>Entry 1</li></ul>]]></description>");
   });
 
-  it("keeps a body containing ]]> from closing the section early", () => {
-    const html = "<p>Compare a[i] with b]]> and c</p>";
-    const xml = buildDigestXml({ digest: digestOf({ html }), links: LINKS, now: NOW });
+  it("escapes ]]> in the lead so it cannot close the CDATA section", () => {
+    const xml = buildDigestXml({ digest: digestOf({ lead: "a ]]> b" }), links: LINKS, now: NOW });
 
-    // Split across two sections, so no section ends before the body does.
-    expect(xml).toContain("]]]]><![CDATA[>");
-    expect(parse(xml).channel.item.description).toBe(html);
+    expect(xml).not.toContain("]]]]><![CDATA[>");
+    expect(parse(xml).channel.item.description).toBe("<p>a ]]&gt; b</p><ul><li>Entry 1</li></ul>");
+  });
+
+  it("carries no link to the articles, so Slack has nothing to unfurl", () => {
+    const description = parse(buildDigestXml({ digest: digestOf(), links: LINKS, now: NOW })).channel.item.description;
+
+    expect(description).not.toMatch(/<a\b/);
+    expect(description).not.toMatch(/https?:\/\//);
+  });
+
+  it("keeps the description within the configured length", () => {
+    const entries = Array.from({ length: 30 }, (_, i) => ({ title: `Entry ${i + 1} title`, link: `https://source.example/${i}` }));
+    const description = parse(
+      buildDigestXml({ digest: digestOf({ entries, availableCount: 45 }), links: LINKS, now: NOW, descriptionMaxChars: 200 }),
+    ).channel.item.description;
+
+    expect(description.length).toBeLessThanOrEqual(200);
+    expect(description).toMatch(/…and \d+ more/);
+  });
+
+  it("keeps the full html out of the description; it belongs to the page", () => {
+    const description = parse(
+      buildDigestXml({ digest: digestOf({ html: "<ul><li>FULL</li></ul>" }), links: LINKS, now: NOW }),
+    ).channel.item.description;
+
+    expect(description).not.toContain("FULL");
   });
 
   it("says when the channel was last built", () => {
