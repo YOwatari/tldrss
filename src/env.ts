@@ -1,3 +1,4 @@
+import { DEFAULT_DESCRIPTION_MAX_CHARS, MIN_DESCRIPTION_MAX_CHARS } from "./digest/description";
 import { DEFAULT_MAX_ENTRIES } from "./feed/select";
 import { isFeedRequestAuthorized } from "./feed/policy";
 
@@ -14,6 +15,11 @@ export type Env = {
    * literal in the config would arrive as a number, so both are accepted.
    */
   MAX_ENTRIES?: string | number;
+  /**
+   * Characters of html in an item's `<description>`. Slack cuts the body at a
+   * fixed length, so this is how the deploy follows if that point moves.
+   */
+  DESCRIPTION_MAX_CHARS?: string | number;
   /**
    * Whether a day with no new entries still gets a digest saying so. Off by
    * default: Slack posts one message per item, and a subscriber does not need
@@ -80,6 +86,20 @@ export function maxEntriesOf(env: Env): number {
   if (!Number.isInteger(configured) || configured < 1) return DEFAULT_MAX_ENTRIES;
 
   return Math.min(configured, MAX_ENTRIES_CEILING);
+}
+
+/**
+ * The configured description length limit, or `DEFAULT_DESCRIPTION_MAX_CHARS`.
+ *
+ * Raised to the floor rather than honoured below it: the lead, one entry and
+ * the "and N more" line no longer fit, and the rendering breaks. No ceiling,
+ * unlike `MAX_ENTRIES`: a large value costs nothing but a longer description.
+ */
+export function descriptionMaxCharsOf(env: Env): number {
+  return Math.max(
+    positiveInteger(env.DESCRIPTION_MAX_CHARS, DEFAULT_DESCRIPTION_MAX_CHARS),
+    MIN_DESCRIPTION_MAX_CHARS,
+  );
 }
 
 /** Spellings that turn a boolean var on. Anything else leaves it off. */
