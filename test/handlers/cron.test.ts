@@ -32,7 +32,7 @@ function fakeSummarizer(): Summarizer & { calls: DigestInput[] } {
     calls,
     async summarize(input) {
       calls.push(input);
-      return "[1] It shipped.";
+      return "It shipped.";
     },
   };
 }

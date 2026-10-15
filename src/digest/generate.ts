@@ -9,7 +9,7 @@
  * lives here rather than in either handler.
  */
 import { buildDigestXml, buildEmptyChannelXml } from "./build";
-import { leadOf, renderDigestHtml, renderEntryListHtml } from "./html";
+import { leadOf } from "./html";
 import type { DigestLanguage } from "./language";
 import { editionOf, periodWindow, type DigestPeriod } from "./period";
 import { noRecentEntriesText, summaryUnavailableText } from "./text";
@@ -145,7 +145,7 @@ async function boundedCleanup(
 }
 
 /**
- * The digest body and its lead: the model's summary, or the day's entries as bare links
+ * The lead of the digest: the model's summary, or a note saying there is none
  * when summarizing failed.
  *
  * Only the summary is given up on. Titles and links are already in hand, and
@@ -153,17 +153,16 @@ async function boundedCleanup(
  * that from a broken feed. The fallback is then cached like any other digest,
  * so a failure costs the day its summary rather than triggering a retry on
  * every crawl. The lead then says the summary was not generated, rather than
- * being left empty, so the feed description does not pass a bare title list
- * off as the whole digest.
+ * being left empty, so a bare title list is not passed off as the whole digest.
  */
-async function summarizeOrList(
+async function summarizeLead(
   summarizer: Summarizer,
   selection: EntrySelection,
   feedTitle: string,
   language: DigestLanguage,
   period: DigestPeriod = "daily",
   deadlineAt: number,
-): Promise<{ html: string; lead: string }> {
+): Promise<string> {
   try {
     const summary = await withinDeadline(summarizer.summarize({
       feedTitle,
@@ -173,16 +172,13 @@ async function summarizeOrList(
       period,
     }, { deadlineAt }), deadlineAt, "summarization");
 
-    // Reference markers are numbered against the list the prompt used.
-    const html = renderDigestHtml(summary, selection.entries, language);
-    // An answer can be non-blank and still leave nothing behind — markup the
-    // sanitizer drops whole, say. An empty body is worse for a reader than the
-    // entry list, so it is treated as a failure to summarize.
-    if (html.trim() === "") throw new Error("Digest body was empty after rendering");
+    // An answer can be non-blank and still leave nothing behind — markup
+    // dropped whole, or bullets with no lead before them. That is treated as
+    // a failure to summarize, so the reader is told rather than shown nothing.
+    const lead = leadOf(summary);
+    if (lead === "") throw new Error("Digest lead was empty after reduction to plain text");
 
-    // An empty lead (the answer opened with a bullet) is kept as is: Slack
-    // then gets the titles alone, which beats the fallback's apology.
-    return { html, lead: leadOf(summary) };
+    return lead;
   } catch (error) {
     console.error(JSON.stringify({
       event: "digest.error", stage: "ai",
@@ -190,10 +186,7 @@ async function summarizeOrList(
       count: selection.entries.length,
     }));
 
-    return {
-      html: renderEntryListHtml(selection.entries, language, period),
-      lead: summaryUnavailableText(language, period),
-    };
+    return summaryUnavailableText(language, period);
   }
 }
 
@@ -241,7 +234,9 @@ async function storeDigest(
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
   await writeWithDeadline(putDigestPage(env.DIGEST_CACHE, ref, {
     feedTitle: digest.feedTitle,
-    html: digest.html,
+    lead: digest.lead,
+    entries: digest.entries,
+    availableCount: digest.availableCount,
   }), deadlineAt, "digest page storage", storage);
   if (Date.now() >= deadlineAt) throw new Error("Digest generation deadline exceeded before storage");
   await writeWithDeadline(putDigest(env.DIGEST_CACHE, ref, buildDigestXml({ digest, links, descriptionMaxChars: descriptionMaxCharsOf(env) })), deadlineAt, "digest storage", storage);
@@ -314,17 +309,16 @@ async function buildDigest(
     end: window.end,
   });
 
-  const noRecent = noRecentEntriesText(ref.language, ref.period);
-  const body =
+  const lead =
     selection.entries.length === 0
-      ? { html: renderDigestHtml(noRecent, [], ref.language), lead: noRecent }
-      : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
+      ? noRecentEntriesText(ref.language, ref.period)
+      : await summarizeLead(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
   return {
     ...ref,
     ...editionOf(ref.date, ref.period),
     feedTitle,
-    ...body,
+    lead,
     entries: selection.entries,
     availableCount: selection.availableCount,
   };

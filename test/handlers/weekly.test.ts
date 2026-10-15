@@ -14,7 +14,7 @@ import type { DigestInput } from "../../src/llm/summarizer";
 const env = { ...providedEnv, ALLOWED_FEED_HOSTS: "source.example", PUBLIC_ORIGIN: "https://worker.example" } as unknown as Env;
 const feedUrl = "https://source.example/weekly";
 const calls: DigestInput[] = [];
-const summarizer = { async summarize(input: DigestInput) { calls.push(input); return "[1] A weekly update."; } };
+const summarizer = { async summarize(input: DigestInput) { calls.push(input); return "A weekly update."; } };
 
 afterEach(async () => {
   calls.length = 0;
@@ -40,7 +40,7 @@ it("registers both periods and serves the same weekly edition through Cron and c
   const xml = await getDigest(env.DIGEST_CACHE, ref);
   expect(xml).toContain("Weekly Digest: Feed");
   expect(xml).toContain(`${daily.hash}-${date}-en-weekly`);
-  expect(xml).toContain("<description><![CDATA[<ul><li>Article</li></ul>]]></description>");
+  expect(xml).toContain("<description><![CDATA[<p>A weekly update.</p><ul><li>Article</li></ul>]]></description>");
   const page = await handleDigestPage(new Request(digestLinksOf(env.PUBLIC_ORIGIN!, ref).pageUrl), env);
   expect(page.status).toBe(200);
   expect(await page.text()).toContain("Weekly Digest: Feed");
@@ -87,7 +87,7 @@ it("retains both weekly XML and HTML for fourteen days", async () => {
   const cache = { put } as unknown as KVNamespace;
   const ref = { hash: "a".repeat(64), date: "2026-09-14", language: "en", period: "weekly" } as const;
   await putDigest(cache, ref, "<rss/>");
-  await putDigestPage(cache, ref, { feedTitle: "Feed", html: "<p>Weekly</p>" });
+  await putDigestPage(cache, ref, { feedTitle: "Feed", lead: "Weekly", entries: [], availableCount: 0 });
   expect(put).toHaveBeenNthCalledWith(1, expect.stringContaining(":weekly"), "<rss/>", { expirationTtl: 14 * 86400 });
   expect(put).toHaveBeenNthCalledWith(2, expect.stringContaining(":weekly"), expect.any(String), { expirationTtl: 14 * 86400 });
 });

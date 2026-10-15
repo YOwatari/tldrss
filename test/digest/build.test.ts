@@ -21,7 +21,6 @@ function digestOf(overrides: Partial<Digest> = {}): Digest {
     windowEnd: "2026-09-10T23:50:00.000Z",
     publishAt: "2026-09-11T00:00:00.000Z",
     feedTitle: "Example Feed",
-    html: "<p>Something shipped.</p>",
     lead: "Something shipped.",
     entries: [{ title: "Entry 1", link: "https://source.example/1" }],
     availableCount: 1,
@@ -116,14 +115,6 @@ describe("buildDigestXml", () => {
 
     expect(description.length).toBeLessThanOrEqual(200);
     expect(description).toMatch(/…and \d+ more/);
-  });
-
-  it("keeps the full html out of the description; it belongs to the page", () => {
-    const description = parse(
-      buildDigestXml({ digest: digestOf({ html: "<ul><li>FULL</li></ul>" }), links: LINKS, now: NOW }),
-    ).channel.item.description;
-
-    expect(description).not.toContain("FULL");
   });
 
   it("says when the channel was last built", () => {

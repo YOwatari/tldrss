@@ -5,9 +5,7 @@ import type { FeedEntry } from "../feed/parse";
 export type DigestInput = {
   feedTitle: string;
   /**
-   * The entries to summarize, newest first; see `selectRecentEntries`. The
-   * prompt numbers them by position, and reference links resolve those numbers
-   * against this same list, so the order is part of the contract.
+   * The entries to summarize, newest first; see `selectRecentEntries`.
    */
   entries: FeedEntry[];
   /**
@@ -21,9 +19,9 @@ export type DigestInput = {
 };
 
 /**
- * The whole of what the digest pipeline knows about an LLM: entries in, digest
- * text out. Keeping it this narrow is what lets the provider be swapped, and
- * lets tests summarize without a model.
+ * The whole of what the digest pipeline knows about an LLM: entries in, the
+ * digest's lead out. Keeping it this narrow is what lets the provider be
+ * swapped, and lets tests summarize without a model.
  *
  * An implementation either returns usable text or throws; it never returns a
  * placeholder. The caller decides what a reader sees when summarizing fails.

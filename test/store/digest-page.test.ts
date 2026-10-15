@@ -10,7 +10,12 @@ const kv = (providedEnv as unknown as { DIGEST_CACHE: KVNamespace }).DIGEST_CACH
 
 const REF = { hash: "a".repeat(64), date: "2026-09-10", language: "en" } as const;
 
-const PAGE = { feedTitle: "Example Feed", html: "<p>Something shipped.</p>" };
+const PAGE = {
+  feedTitle: "Example Feed",
+  lead: "Something shipped.",
+  entries: [{ title: "Entry 1", link: "https://source.example/1" }],
+  availableCount: 1,
+};
 
 afterEach(async () => {
   await reset();
@@ -49,6 +54,22 @@ describe("getDigestPage", () => {
     ).resolves.toBeNull();
   });
 
+  it("stores only the title and link of each entry", async () => {
+    await putDigestPage(kv, REF, {
+      ...PAGE,
+      entries: [{ title: "Entry 1", link: "https://source.example/1", content: "body", isoDate: "x" } as never],
+    });
+
+    await expect(getDigestPage(kv, REF)).resolves.toEqual(PAGE);
+  });
+
+  it("returns a record of the legacy shape as it was stored", async () => {
+    const legacy = { feedTitle: "Example Feed", html: "<ul><li>Old</li></ul>" };
+    await kv.put(digestPageKey(REF), JSON.stringify(legacy));
+
+    await expect(getDigestPage(kv, REF)).resolves.toEqual(legacy);
+  });
+
   it("treats a stored value it cannot read as absent", async () => {
     await kv.put(digestPageKey(REF), "not json");
 
@@ -56,7 +77,14 @@ describe("getDigestPage", () => {
   });
 
   it("treats a record of another shape as absent", async () => {
-    for (const stored of ['"just a string"', "null", '{"html":"<p>a</p>"}', "{}"]) {
+    for (const stored of [
+      '"just a string"',
+      "null",
+      '{"html":"<p>a</p>"}',
+      "{}",
+      '{"feedTitle":"F","lead":"L","entries":[1],"availableCount":1}',
+      '{"feedTitle":"F","lead":"L","entries":[]}',
+    ]) {
       await kv.put(digestPageKey(REF), stored);
 
       await expect(getDigestPage(kv, REF)).resolves.toBeNull();

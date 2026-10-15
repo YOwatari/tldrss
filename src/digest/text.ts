@@ -28,6 +28,16 @@ export function moreEntriesText(count: number, language: DigestLanguage = DEFAUL
   return language === "ja" ? `…ほか ${count} 件` : `…and ${count} more`;
 }
 
+/**
+ * Closing line of the full-text page when `MAX_ENTRIES` cut the list: how many
+ * entries were left out, and that the ones shown are the newest.
+ */
+export function pageMoreEntriesText(count: number, listed: number, language: DigestLanguage = DEFAULT_LANGUAGE): string {
+  return language === "ja"
+    ? `ほか ${count} 件（新しい順に ${listed} 件まで掲載）`
+    : `…and ${count} more (only the newest ${listed} are listed)`;
+}
+
 /** Digest body for a feed with nothing recent enough to summarize. */
 export function noRecentEntriesText(language: DigestLanguage = DEFAULT_LANGUAGE, period: DigestPeriod = "daily"): string {
   if (period === "weekly") return language === "ja" ? "対象の週に公開された新しいエントリはありません。" : "No new entries were published in the covered week.";

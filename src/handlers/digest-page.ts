@@ -6,6 +6,7 @@
  * from the feed hash rather than the feed url, so it can be handed out
  * without exposing a private feed's credentials.
  */
+import { renderDigestBodyHtml } from "../digest/html";
 import { itemTitleText } from "../digest/text";
 import {
   DEFAULT_LANGUAGE,
@@ -14,7 +15,7 @@ import {
   isDigestLanguage,
 } from "../digest/language";
 import type { Env } from "../env";
-import { type DigestPage, getDigestPage } from "../store/digest-page";
+import { getDigestPage, isLegacyDigestPage, type StoredDigestPage } from "../store/digest-page";
 import type { DigestRef } from "../store/digest-ref";
 import { isDigestPeriod } from "../digest/period";
 
@@ -29,7 +30,7 @@ const PATH_PATTERN = /^\/digest\/([0-9a-f]{64})\/(\d{4}-\d{2}-\d{2})$/;
 const HTML_HEADERS = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "public, max-age=3600",
-  // The body is sanitized already; this is the second line of defence, and it
+  // The body is escaped already; this is the second line of defence, and it
   // also keeps a digest from pulling in anything over the network.
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
   "x-content-type-options": "nosniff",
@@ -67,12 +68,18 @@ function notFound(): Response {
 }
 
 /**
- * The digest as a standalone page. The body is inserted as markup: it left the
- * sanitizer as an html fragment (see `renderDigestHtml`), and escaping it here
- * would show the reader tags instead of a digest.
+ * The digest as a standalone page: the lead, then every selected entry linked
+ * to its article.
+ *
+ * A record from before the page was stored as data carries its body as html
+ * that left the sanitizer, and is inserted as it is: escaping it would show
+ * the reader tags instead of a digest. Those records expire with their TTL.
  */
-function renderPage(page: DigestPage, ref: DigestRef): string {
+function renderPage(page: StoredDigestPage, ref: DigestRef): string {
   const title = escapeHtml(itemTitleText(page.feedTitle, ref.date, ref.language, ref.period));
+  const body = isLegacyDigestPage(page)
+    ? page.html
+    : renderDigestBodyHtml({ ...page, language: ref.language });
 
   return `<!DOCTYPE html>
 <html lang="${ref.language}">
@@ -85,7 +92,7 @@ function renderPage(page: DigestPage, ref: DigestRef): string {
 </head>
 <body>
 <h1>${title}</h1>
-${page.html}
+${body}
 </body>
 </html>`;
 }

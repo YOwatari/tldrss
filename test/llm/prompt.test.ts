@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_BULLET_CHARS,
   MAX_EXCERPT_CHARS,
   buildDigestPrompt,
   systemPromptFor,
@@ -83,8 +82,13 @@ describe("buildDigestPrompt", () => {
     expect(prompt).not.toContain("u".repeat(MAX_EXCERPT_CHARS + 1));
   });
 
-  it("caps how long each bullet may be", () => {
-    expect(buildDigestPrompt(inputWith())).toContain(`${MAX_BULLET_CHARS}`);
+  it("asks for the lead alone, not a summary per entry", () => {
+    for (const language of ["en", "ja"] as const) {
+      const prompt = buildDigestPrompt(inputWith({ language }));
+      expect(prompt).not.toMatch(/square brackets|角かっこ|one bullet per entry|1 件につき 1 項目/);
+    }
+    expect(buildDigestPrompt(inputWith())).toContain("Do not summarize the entries one by one");
+    expect(buildDigestPrompt(inputWith({ language: "ja" }))).toContain("エントリを 1 件ずつ要約しないでください");
   });
 });
 
@@ -92,24 +96,12 @@ describe("buildDigestPrompt (language)", () => {
   it("prompts in English by default", () => {
     const prompt = buildDigestPrompt(inputWith());
 
-    expect(prompt).toContain("Create a concise daily digest");
+    expect(prompt).toContain("Write the lead of a daily digest");
     expect(prompt).not.toContain("日本語");
   });
 
   it("instructs the model to write the digest in Japanese when asked", () => {
     expect(buildDigestPrompt(inputWith({ language: "ja" }))).toContain("日本語");
-  });
-
-  it("asks the model to cite entry numbers in both languages", () => {
-    expect(buildDigestPrompt(inputWith())).toContain("square brackets");
-    expect(buildDigestPrompt(inputWith({ language: "ja" }))).toContain("角かっこ");
-  });
-
-  // Asking for 4-8 bullets while forbidding repeats and invented numbers is
-  // impossible for a feed this small, and pushes the model to make numbers up.
-  it("allows covering every entry of a short feed", () => {
-    expect(buildDigestPrompt(inputWith())).toContain("fewer than four");
-    expect(buildDigestPrompt(inputWith({ language: "ja" }))).toContain("4 件未満");
   });
 });
 

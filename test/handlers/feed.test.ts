@@ -14,7 +14,7 @@ const WORKER_URL = `https://worker.example/feed?url=${FEED_URL}`;
  */
 const bindings = { ...(providedEnv as unknown as Omit<Env, "AI">), ALLOWED_FEED_HOSTS: "source.example" };
 
-function fakeSummarizer(answer = "[1] It shipped."): Summarizer & {
+function fakeSummarizer(answer = "It shipped."): Summarizer & {
   calls: DigestInput[];
 } {
   const calls: DigestInput[] = [];
