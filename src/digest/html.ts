@@ -14,6 +14,9 @@ import { pageMoreEntriesText, untitledEntryText } from "./text";
  */
 const BULLET_PATTERN = /^\s*(?:[-*•]\s*)?\[(\d+)\]\s*(.+)$/;
 
+/** Tags that break a line of the answer: paragraphs, list items, line breaks. */
+const BLOCK_TAG_PATTERN = /<\/?(?:p|div|ul|ol|li|br|h[1-6])\b[^>]*>/gi;
+
 /**
  * Escapes text for HTML. `escapeXml` in `rss.ts` serves a different layer: the
  * digest body is HTML nested inside an XML element, so it is escaped twice.
@@ -38,7 +41,8 @@ export function escapeHtml(text: string): string {
  * to summarize.
  */
 export function leadOf(summary: string): string {
-  const lines = summary.split("\n");
+  // Block tags end a line, so a bullet wrapped in `<li>` is found too.
+  const lines = summary.replace(BLOCK_TAG_PATTERN, "\n").split("\n");
   const firstBullet = lines.findIndex((line) => BULLET_PATTERN.test(line));
   const prose = firstBullet === -1 ? summary : lines.slice(0, firstBullet).join("\n");
 

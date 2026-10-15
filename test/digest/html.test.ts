@@ -85,6 +85,8 @@ describe("leadOf", () => {
   it("keeps only the text before bullets the model added anyway", () => {
     expect(leadOf("Lead.\n[1] It shipped.\nThanks for reading.")).toBe("Lead.");
     expect(leadOf("Lead.\n- [1] It shipped.")).toBe("Lead.");
+    expect(leadOf("<p>Lead.</p><ul><li>[1] It shipped.</li></ul>")).toBe("Lead.");
+    expect(leadOf("Lead.<br>[1] It shipped.")).toBe("Lead.");
   });
   it("is empty when the answer opens with a bullet", () => {
     expect(leadOf("[1] It shipped.")).toBe("");
