@@ -19,6 +19,11 @@ describe("renderDescriptionHtml", () => {
     expect(renderDescriptionHtml({ lead: "A busy day.", entries: [entry("A"), entry("B")], availableCount: 2, language: "en", maxChars: 450 }))
       .toBe("<p>A busy day.</p><ul><li>A</li><li>B</li></ul>");
   });
+  it("keeps the whole lead when the lead and every title fit, without reserving room for a remainder", () => {
+    const lead = "A.".repeat(210);
+    expect(renderDescriptionHtml({ lead, entries: [entry("A")], availableCount: 1, language: "en", maxChars: 450 }))
+      .toBe(`<p>${lead}</p><ul><li>A</li></ul>`);
+  });
   it("counts the entries MAX_ENTRIES left out", () => {
     expect(renderDescriptionHtml({ lead: "L", entries: [entry("A"), entry("B")], availableCount: 5, language: "ja", maxChars: 450 }))
       .toBe("<p>L</p><ul><li>A</li><li>B</li></ul><p>…ほか 3 件</p>");

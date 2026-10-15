@@ -101,9 +101,16 @@ export function renderDescriptionHtml(params: {
     return left > 0 ? paragraph(moreEntriesText(left, language)) : "";
   };
 
+  const plainLead = withoutUrls(params.lead);
+  // The budgets below reserve room for a remainder line, which a day where
+  // everything fits never shows; trying the whole description first keeps
+  // that reserve from cutting a lead that fits.
+  const whole = (plainLead === "" ? "" : paragraph(plainLead)) + list(titles) + remainder(titles.length);
+  if (whole.length <= maxChars) return whole;
+
   const shared = maxChars - remainder(0).length;
   const leadBudget = shared - firstTitleReserve(titles, shared);
-  const lead = renderLead(withoutUrls(params.lead), leadBudget);
+  const lead = renderLead(plainLead, leadBudget);
 
   const render = (listed: string[]) => lead + list(listed) + remainder(listed.length);
 
