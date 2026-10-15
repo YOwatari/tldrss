@@ -20,7 +20,6 @@ describe("renderDescriptionHtml", () => {
       .toBe("<p>A busy day.</p><ul><li>A</li><li>B</li></ul>");
   });
   it("counts the entries MAX_ENTRIES left out", () => {
-    // 2 件を載せ、上限前は 5 件
     expect(renderDescriptionHtml({ lead: "L", entries: [entry("A"), entry("B")], availableCount: 5, language: "ja", maxChars: 450 }))
       .toBe("<p>L</p><ul><li>A</li><li>B</li></ul><p>…ほか 3 件</p>");
   });
@@ -82,7 +81,7 @@ describe("renderDescriptionHtml", () => {
     const html = renderDescriptionHtml({ lead: "<b>x</b>", entries: Array.from({ length: 20 }, () => entry("&".repeat(30))), availableCount: 20, language: "en", maxChars: 450 });
     expect(html).toContain("<p>&lt;b&gt;x&lt;/b&gt;</p>");
     expect(html.length).toBeLessThanOrEqual(450);
-    expect(html).not.toMatch(/&(?!amp;|lt;|gt;|quot;)/); // エンティティを割っていない
+    expect(html).not.toMatch(/&(?!amp;|lt;|gt;|quot;)/); // no entity was split by a cut
   });
   it("never leaves half of a surrogate pair when cutting", () => {
     const html = renderDescriptionHtml({ lead: "😀".repeat(500), entries: [entry("🎉".repeat(500))], availableCount: 1, language: "ja", maxChars: 450 });

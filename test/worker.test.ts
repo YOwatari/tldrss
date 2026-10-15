@@ -704,7 +704,7 @@ describe("GET /feed (description)", () => {
 
     expect(description.length).toBeLessThanOrEqual(450);
     expect(description).not.toMatch(/<a\b|https?:\/\//i);
-    // MAX_ENTRIES (30) で切った 30 件も N に含まれる
+    // N also counts the 30 entries MAX_ENTRIES cut before rendering
     expect(description).toContain(lang === "ja" ? `…ほか ${60 - listed} 件` : `…and ${60 - listed} more`);
   });
 
