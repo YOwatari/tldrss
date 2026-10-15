@@ -48,6 +48,14 @@ describe("renderDescriptionHtml", () => {
     expect(html).toMatch(/^<p>(これは長いリード文の一文です。)+…<\/p>/);
     expect(liTexts(html)[0]).toBe("記事A");
   });
+  it("lists a first title longer than 40 characters whole when it fits beside a long lead", () => {
+    const lead = "今日は多くの更新がありました。".repeat(30);
+    const title = "大規模言語モデルの推論コストを半分にする新しい量子化手法と、その実運用で分かった五つの課題について解説";
+    const html = renderDescriptionHtml({ lead, entries: [entry(title)], availableCount: 5, language: "ja", maxChars: 450 });
+    expect(html.length).toBeLessThanOrEqual(450);
+    expect(liTexts(html)).toEqual([title]);
+    expect(html).toContain("<p>…ほか 4 件</p>");
+  });
   it("hard-cuts a lead that has no sentence boundary", () => {
     const html = renderDescriptionHtml({ lead: "あ".repeat(1000), entries: [entry("A")], availableCount: 1, language: "ja", maxChars: 450 });
     expect(html.length).toBeLessThanOrEqual(450);

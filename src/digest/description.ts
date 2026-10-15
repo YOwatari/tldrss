@@ -17,9 +17,6 @@ import { moreEntriesText, untitledEntryText } from "./text";
 export const DEFAULT_DESCRIPTION_MAX_CHARS = 450;
 export const MIN_DESCRIPTION_MAX_CHARS = 100;
 
-/** Room held back from the lead for the first title, so a long lead cannot crowd out every entry. */
-const TITLE_RESERVE_CHARS = 40;
-
 const URL_PATTERN = /https?:\/\/\S*/gi;
 const SENTENCE_END = /[。．.!?！？]/u;
 const ELLIPSIS = "…";
@@ -76,6 +73,19 @@ function renderLead(lead: string, budget: number): string {
   return prefix === null ? "" : cut(prefix);
 }
 
+const LIST_MARKUP = "<ul></ul><li></li>";
+
+/**
+ * Room held back from the lead so the first title can be listed whole. It is
+ * capped at half of what lead and list share: reserving a title of any length
+ * would let one oversized title (which gets truncated anyway) starve the lead.
+ */
+function firstTitleReserve(titles: string[], shared: number): number {
+  if (titles.length === 0) return 0;
+  const half = Math.floor((shared - LIST_MARKUP.length) / 2);
+  return LIST_MARKUP.length + Math.min(escapeHtml(titles[0]).length, half);
+}
+
 /**
  * Lead, then as many whole titles as fit in feed order, then how many were
  * left out. Everything is measured as the html Slack receives.
@@ -91,13 +101,7 @@ export function renderDescriptionHtml(params: {
   const titles = entries.map((entry) => withoutUrls(entry.title ?? "") || untitledEntryText(language));
   const remainder = (listed: number) => more(Math.max(availableCount - listed, 0), language);
 
-  const leadBudget =
-    titles.length === 0
-      ? maxChars - remainder(0).length
-      : maxChars -
-        ("<ul></ul><li></li>".length +
-          Math.min(escapeHtml(titles[0]).length, TITLE_RESERVE_CHARS) +
-          remainder(0).length);
+  const leadBudget = maxChars - remainder(0).length - firstTitleReserve(titles, maxChars - remainder(0).length);
   const lead = renderLead(withoutUrls(params.lead), leadBudget);
 
   const render = (listed: string[]) => lead + list(listed) + remainder(listed.length);
