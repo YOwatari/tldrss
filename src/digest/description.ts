@@ -34,10 +34,6 @@ function list(titles: string[]): string {
   return titles.length === 0 ? "" : `<ul>${titles.map((title) => `<li>${escapeHtml(title)}</li>`).join("")}</ul>`;
 }
 
-function more(count: number, language: DigestLanguage): string {
-  return count > 0 ? paragraph(moreEntriesText(count, language)) : "";
-}
-
 /**
  * The longest non-empty prefix of `chars` that `fits`, or null. Prefixes are
  * cut by code point and measured after escaping, so neither a surrogate pair
@@ -100,9 +96,13 @@ export function renderDescriptionHtml(params: {
 }): string {
   const { entries, availableCount, language, maxChars } = params;
   const titles = entries.map((entry) => withoutUrls(entry.title ?? "") || untitledEntryText(language));
-  const remainder = (listed: number) => more(Math.max(availableCount - listed, 0), language);
+  const remainder = (listed: number) => {
+    const left = availableCount - listed;
+    return left > 0 ? paragraph(moreEntriesText(left, language)) : "";
+  };
 
-  const leadBudget = maxChars - remainder(0).length - firstTitleReserve(titles, maxChars - remainder(0).length);
+  const shared = maxChars - remainder(0).length;
+  const leadBudget = shared - firstTitleReserve(titles, shared);
   const lead = renderLead(withoutUrls(params.lead), leadBudget);
 
   const render = (listed: string[]) => lead + list(listed) + remainder(listed.length);

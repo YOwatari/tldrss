@@ -314,12 +314,10 @@ async function buildDigest(
     end: window.end,
   });
 
+  const noRecent = noRecentEntriesText(ref.language, ref.period);
   const body =
     selection.entries.length === 0
-      ? {
-          html: renderDigestHtml(noRecentEntriesText(ref.language, ref.period), [], ref.language),
-          lead: noRecentEntriesText(ref.language, ref.period),
-        }
+      ? { html: renderDigestHtml(noRecent, [], ref.language), lead: noRecent }
       : await summarizeOrList(summarizer, selection, feedTitle, ref.language, ref.period, deadlineAt);
 
   return {
