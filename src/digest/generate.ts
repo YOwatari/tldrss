@@ -152,7 +152,9 @@ async function boundedCleanup(
  * a reader whose subscription goes silent on a model outage has no way to tell
  * that from a broken feed. The fallback is then cached like any other digest,
  * so a failure costs the day its summary rather than triggering a retry on
- * every crawl.
+ * every crawl. The lead then says the summary was not generated, rather than
+ * being left empty, so the feed description does not pass a bare title list
+ * off as the whole digest.
  */
 async function summarizeOrList(
   summarizer: Summarizer,
