@@ -10,7 +10,7 @@ import { sha256Hex } from "../../src/hash";
 const kv = (providedEnv as unknown as Env).DIGEST_CACHE;
 const scheduledTime = Date.parse("2026-09-09T23:50:00Z");
 const trigger = { scheduledTime, cron: "50 23 * * *" };
-const summarizer = { summarize: vi.fn().mockResolvedValue("[1] A summary.") };
+const summarizer = { summarize: vi.fn().mockResolvedValue("A summary.") };
 const bindings = () => ({ DIGEST_CACHE: kv, PUBLIC_ORIGIN: "https://worker.example" }) as Env;
 
 async function health(env = bindings(), method = "GET") {

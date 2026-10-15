@@ -11,9 +11,6 @@ import type { DigestInput } from "./summarizer";
  */
 export const MAX_EXCERPT_CHARS = 500;
 
-/** Upper bound suggested to the model for a single bullet, in characters. */
-export const MAX_BULLET_CHARS = 80;
-
 type PromptCopy = {
   system: string;
   intro: (feedTitle: string, period: DigestPeriod) => string;
@@ -26,50 +23,33 @@ const COPY: Record<DigestLanguage, PromptCopy> = {
   en: {
     system:
       "You are an editor who writes short, factual daily digests of RSS feeds. " +
-      "Answer with the digest only, without preamble.",
+      "Answer with the lead only, without preamble.",
     intro: (feedTitle, period) =>
-      `Create a concise ${period} digest of the following RSS entries from "${feedTitle}".`,
+      `Write the lead of a ${period} digest of the following RSS entries from "${feedTitle}".`,
     rules: [
-      "Open with a 2-3 sentence lead saying what the day was about, on its own " +
-        "line and without any number.",
-      "Then write one bullet per entry: the 4-8 most notable ones, or every " +
-        "entry listed when fewer than four are available. Never cover the same " +
-        "entry twice.",
-      "Write one line per bullet: the entry number in square brackets, then the " +
-        'summary, e.g. "[3] Adds a Rust query and covers Kotlin frameworks." ' +
-        "Use only the numbers listed below.",
-      "The reader already sees each title, so a bullet must add what the title " +
-        "leaves out — numbers, scope, or conditions taken from the excerpt. " +
-        "Never restate the title.",
-      `Keep each bullet under ${MAX_BULLET_CHARS} characters, factual and easy to scan.`,
+      "Write 2-3 sentences saying what the day was about, as one paragraph of " +
+        "plain prose.",
+      "Do not summarize the entries one by one: the reader sees every title " +
+        "listed under the lead. Use no bullets, entry numbers, headings or markup.",
       "Use only the entries listed below. Never add information they do not " +
-        "carry, and never write a url of your own.",
+        "carry, and never write a url.",
     ],
     note: (included, available) =>
-      `Summarizing the ${included} of ${available} most recent entries.`,
+      `Covering the ${included} of ${available} most recent entries.`,
   },
   ja: {
     system:
       "あなたは RSS フィードの日次ダイジェストを簡潔かつ事実に忠実にまとめる編集者です。" +
-      "前置きや後書きを付けず、ダイジェスト本文だけを日本語で出力してください。",
+      "前置きや後書きを付けず、リード文だけを日本語で出力してください。",
     intro: (feedTitle, period) =>
-      `次の「${feedTitle}」の RSS エントリから、${period === "weekly" ? "週次" : "日次"}ダイジェストを作成してください。`,
+      `次の「${feedTitle}」の RSS エントリから、${period === "weekly" ? "週次" : "日次"}ダイジェストのリード文を書いてください。`,
     rules: [
-      "最初に、その日の全体像を 2〜3 文でまとめたリード文を書いてください。" +
-        "リード文は独立した行に書き、番号を付けないでください。",
-      "続けて、エントリ 1 件につき 1 項目を書いてください。重要なものを 4〜8 件" +
-        "選び、エントリが 4 件未満のときは挙がっているものをすべて扱ってください。" +
-        "同じエントリを二度扱わないでください。",
-      "各項目は 1 行で、エントリ番号を角かっこで囲んだあとに要約を続けてください。" +
-        "例:「[3] Rust のクエリが追加され、Kotlin のフレームワークも対象になった。」。" +
-        "番号は下のリストのものだけを使ってください。",
-      "読者には見出しがそのまま表示されるので、各項目には見出しにない情報" +
-        "（数値・対象範囲・条件など）を本文から必ず 1 つ入れてください。" +
-        "見出しの言い換えにしないでください。",
-      `各項目は ${MAX_BULLET_CHARS} 字以内で、事実に忠実に、ひと目で読める分量にしてください。`,
+      "その日の全体像を 2〜3 文でまとめ、1 段落の平文で書いてください。",
+      "エントリを 1 件ずつ要約しないでください。読者にはリード文の下に全エントリの" +
+        "見出しが表示されます。箇条書き、エントリ番号、見出し、マークアップは使わないでください。",
       "下に挙げたエントリの情報だけを使ってください。書かれていない情報を" +
-        "補ったり、URL を自分で書いたりしないでください。",
-      "エントリの原文が英語であっても、ダイジェストは日本語で書いてください。",
+        "補ったり、URL を書いたりしないでください。",
+      "エントリの原文が英語であっても、リード文は日本語で書いてください。",
     ],
     note: (included, available) =>
       `全 ${available} 件のうち、新しい方から ${included} 件を対象とします。`,
@@ -98,9 +78,8 @@ function entryBlock(entry: FeedEntry, index: number, language: DigestLanguage): 
 }
 
 /**
- * The user message: the rules, then the entries numbered as the digest has to
- * cite them. Nothing here is trusted output — the numbering is the only thing
- * the renderer takes from the model's answer.
+ * The user message: the rules, then the entries. Nothing here is trusted
+ * output — the renderer takes only the lead's plain text from the answer.
  */
 export function buildDigestPrompt(input: DigestInput): string {
   const copy = COPY[input.language];

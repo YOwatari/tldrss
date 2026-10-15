@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leadOf, renderDigestHtml, renderEntryListHtml } from "../../src/digest/html";
+import { leadOf, renderDigestBodyHtml } from "../../src/digest/html";
 
 const entries = [
   { title: "First article", link: "https://example.com/1" },
@@ -7,258 +7,99 @@ const entries = [
   { title: "No link article" },
 ];
 
-describe("renderDigestHtml", () => {
-  it("builds a list whose headings link to the article", () => {
-    const html = renderDigestHtml("[1] It shipped.", entries);
+describe("renderDigestBodyHtml", () => {
+  it("renders the lead, then every entry linked to its article", () => {
+    const html = renderDigestBodyHtml({ lead: "A busy day.", entries, availableCount: 3 });
 
     expect(html).toBe(
-      '<ul>\n  <li><a href="https://example.com/1">First article</a><br />It shipped.</li>\n</ul>',
+      "<p>A busy day.</p>\n<ul>\n" +
+        '  <li><a href="https://example.com/1">First article</a></li>\n' +
+        '  <li><a href="https://example.com/2?a=1&amp;b=2">Second &amp; third</a></li>\n' +
+        "  <li>No link article</li>\n</ul>",
     );
   });
 
-  it("keeps the entry order rather than the order the model listed them", () => {
-    const html = renderDigestHtml("[2] Second summary.\n[1] First summary.", entries);
+  it("carries no per-entry summary", () => {
+    const html = renderDigestBodyHtml({ lead: "Lead.", entries, availableCount: 3 });
 
-    expect(html.indexOf("First article")).toBeLessThan(html.indexOf("Second &amp; third"));
+    expect(html).not.toContain("<br");
   });
 
-  it("accepts bullets the model prefixed with a list marker", () => {
-    expect(renderDigestHtml("* [1] It shipped.", entries)).toContain("It shipped.");
-    expect(renderDigestHtml("• [1] It shipped.", entries)).toContain("It shipped.");
-    expect(renderDigestHtml("- [1] It shipped.", entries)).toContain("It shipped.");
+  it("escapes the lead", () => {
+    const html = renderDigestBodyHtml({ lead: "a <script> & b", entries: [], availableCount: 0 });
+
+    expect(html).toBe("<p>a &lt;script&gt; &amp; b</p>");
   });
 
-  it("renders a heading without a link when the entry carries none", () => {
-    const html = renderDigestHtml("[3] No link here.", entries);
-
-    expect(html).toContain("<li>No link article<br />No link here.</li>");
-    expect(html).not.toContain("<a href");
-  });
-
-  it("ignores a number pointing outside the entry list", () => {
-    const html = renderDigestHtml("[1] It shipped.\n[9] Invented.", entries);
-
-    expect(html).toContain("It shipped.");
-    expect(html).not.toContain("Invented.");
-  });
-
-  it("falls back to the raw text when no bullet resolves to an entry", () => {
-    // An empty digest would be worse than showing what the model wrote.
-    expect(renderDigestHtml("[9] Invented.", entries)).toBe("[9] Invented.");
-  });
-
-  it("keeps only the first bullet when the model repeats an entry", () => {
-    const html = renderDigestHtml("[1] First take.\n[1] Second take.", entries);
-
-    expect(html).toContain("First take.");
-    expect(html).not.toContain("Second take.");
-  });
-
-  it("falls back to the raw text when the model ignores the format", () => {
-    const html = renderDigestHtml("No new entries were published.", entries);
-
-    expect(html).toBe("No new entries were published.");
-  });
-
-  it("keeps the allowed markup of a model that answered in html", () => {
-    const html = renderDigestHtml("<p>Lead.</p><ul><li>One</li></ul>", entries);
-
-    expect(html).toBe("<p>Lead.</p><ul><li>One</li></ul>");
-  });
-
-  it("keeps a link of a model that answered in html when the feed published it", () => {
-    const html = renderDigestHtml(
-      '<p><a href="https://example.com/1">First article</a></p>',
-      entries,
+  it("says how many entries MAX_ENTRIES left out, and that the newest are shown", () => {
+    expect(renderDigestBodyHtml({ lead: "Lead.", entries, availableCount: 10 })).toContain(
+      "<p>…and 7 more (only the newest 3 are listed)</p>",
     );
-
-    expect(html).toBe('<p><a href="https://example.com/1">First article</a></p>');
-  });
-
-  // The model is prompted with feed text, so a url in its answer is not
-  // evidence that the feed published it.
-  it("refuses a link a model invented", () => {
-    const html = renderDigestHtml(
-      '<p><a href="https://phishing.example/pay">Claim your prize</a></p>',
-      entries,
-    );
-
-    expect(html).toBe("<p><a>Claim your prize</a></p>");
-  });
-
-  it("sanitizes the markup of a model that answered in html", () => {
-    const html = renderDigestHtml(
-      '```html\n<p onclick="steal()">Lead.</p><script>alert(1)</script>\n```',
-      entries,
-    );
-
-    expect(html).toBe("<p>Lead.</p>");
-  });
-
-  it("keeps the line breaks of a plain-text answer", () => {
-    expect(renderDigestHtml("first\nsecond", entries)).toBe("first<br />second");
-  });
-
-  it("escapes html from the model and from the feed", () => {
-    const hostile = [{ title: "<b>t</b>", link: 'https://example.com/"><script>x</script>' }];
-
-    const html = renderDigestHtml("[1] <script>alert(1)</script>", hostile);
-
-    expect(html).not.toContain("<script>");
-    expect(html).toContain("&lt;b&gt;t&lt;/b&gt;");
-    expect(html).toContain("&quot;&gt;&lt;script&gt;");
-  });
-
-  it("escapes ampersands in the article url", () => {
-    expect(renderDigestHtml("[2] Summary.", entries)).toContain(
-      'href="https://example.com/2?a=1&amp;b=2"',
-    );
-  });
-});
-
-describe("renderDigestHtml (untitled entries)", () => {
-  const untitled = [{ link: "https://example.com/1" }];
-
-  it("labels an untitled entry in English by default", () => {
-    expect(renderDigestHtml("[1] Summary.", untitled)).toContain("(untitled)");
-  });
-
-  it("labels an untitled entry in Japanese for a Japanese digest", () => {
-    const html = renderDigestHtml("[1] Summary.", untitled, "ja");
-
-    expect(html).toContain("(タイトルなし)");
-    expect(html).not.toContain("(untitled)");
-  });
-});
-
-describe("renderDigestHtml (unsafe urls)", () => {
-  it.each(["javascript:alert(1)", "data:text/html,<script>x</script>", "vbscript:x"])(
-    "renders the title as plain text for a %s link",
-    (link) => {
-      const html = renderDigestHtml("[1] Summary.", [{ title: "Hostile", link }]);
-
-      expect(html).not.toContain("<a href");
-      expect(html).toContain("<li>Hostile<br />Summary.</li>");
-    },
-  );
-
-  it("renders the title as plain text when the link is a guid, not a url", () => {
-    // parse.ts falls back to <guid>/<id> when an entry carries no link.
-    const html = renderDigestHtml("[1] Summary.", [
-      { title: "Guid only", link: "urn:uuid:8f1b0c62-0000-4000-8000-000000000000" },
-    ]);
-
-    expect(html).not.toContain("<a href");
-    expect(html).toContain("<li>Guid only<br />Summary.</li>");
-  });
-
-  it("renders the title as plain text for a relative link", () => {
-    const html = renderDigestHtml("[1] Summary.", [{ title: "Relative", link: "/article/1" }]);
-
-    expect(html).not.toContain("<a href");
-  });
-
-  it("keeps linking absolute http and https urls", () => {
-    for (const link of ["http://example.com/1", "https://example.com/1"]) {
-      expect(renderDigestHtml("[1] Summary.", [{ title: "Fine", link }])).toContain(
-        `<a href="${link}">Fine</a>`,
-      );
-    }
-  });
-});
-
-describe("renderDigestHtml (lead)", () => {
-  it("puts the text before the bullets into a lead paragraph", () => {
-    const html = renderDigestHtml("Security was the theme today.\n[1] It shipped.", entries);
-
-    expect(html).toBe(
-      "<p>Security was the theme today.</p>\n" +
-        '<ul>\n  <li><a href="https://example.com/1">First article</a><br />It shipped.</li>\n</ul>',
+    expect(renderDigestBodyHtml({ lead: "Lead.", entries, availableCount: 10, language: "ja" })).toContain(
+      "<p>ほか 7 件（新しい順に 3 件まで掲載）</p>",
     );
   });
 
-  it("joins a multi-line lead", () => {
-    const html = renderDigestHtml("First sentence.\nSecond sentence.\n[1] It shipped.", entries);
-
-    expect(html).toContain("<p>First sentence.<br />Second sentence.</p>");
-  });
-
-  it("omits the paragraph when the model wrote no lead", () => {
-    expect(renderDigestHtml("[1] It shipped.", entries)).not.toContain("<p>");
-  });
-
-  it("ignores anything the model added after the bullets", () => {
-    const html = renderDigestHtml("[1] It shipped.\nThat is all for today.", entries);
-
-    expect(html).not.toContain("That is all for today.");
-  });
-
-  it("escapes html in the lead", () => {
-    const html = renderDigestHtml("<script>x</script>\n[1] It shipped.", entries);
-
-    expect(html).not.toContain("<script>");
-    expect(html).toContain("<p>&lt;script&gt;x&lt;/script&gt;</p>");
-  });
-});
-
-describe("renderEntryListHtml", () => {
-  const entries = [
-    { title: "First article", link: "https://example.com/1" },
-    { title: "Second article", link: "https://example.com/2" },
-  ];
-
-  it("says why the summary is missing and lists every entry as a link", () => {
-    const html = renderEntryListHtml(entries);
-
-    expect(html).toContain("<p>A summary could not be generated");
-    expect(html).toContain('<li><a href="https://example.com/1">First article</a></li>');
-    expect(html).toContain('<li><a href="https://example.com/2">Second article</a></li>');
-  });
-
-  it("writes the notice in Japanese for a Japanese digest", () => {
-    expect(renderEntryListHtml(entries, "ja")).toContain("要約を生成できませんでした");
-  });
-
-  it("keeps an entry the feed gave no link as plain text", () => {
-    expect(renderEntryListHtml([{ title: "No link" }])).toContain("<li>No link</li>");
+  it("says nothing more when every entry is listed", () => {
+    expect(renderDigestBodyHtml({ lead: "Lead.", entries, availableCount: 3 })).not.toMatch(/more|ほか/);
   });
 
   it("labels an entry the feed gave no title", () => {
-    expect(renderEntryListHtml([{ link: "https://example.com/1" }])).toContain("(untitled)");
+    expect(renderDigestBodyHtml({ lead: "", entries: [{ link: "https://example.com/1" }], availableCount: 1 })).toContain("(untitled)");
+    expect(renderDigestBodyHtml({ lead: "", entries: [{}], availableCount: 1, language: "ja" })).toContain("(タイトルなし)");
   });
 
   it("escapes a hostile title and refuses a hostile link", () => {
-    const html = renderEntryListHtml([
-      { title: "<script>alert(1)</script>", link: "javascript:alert(1)" },
-    ]);
+    const html = renderDigestBodyHtml({
+      lead: "",
+      entries: [{ title: "<script>alert(1)</script>", link: "javascript:alert(1)" }],
+      availableCount: 1,
+    });
 
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("javascript:");
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("renders the notice alone when there is nothing to list", () => {
-    expect(renderEntryListHtml([])).not.toContain("<ul>");
+  it("links only absolute http(s) urls", () => {
+    for (const link of ["data:text/html,x", "/article/1", "not a url"]) {
+      expect(renderDigestBodyHtml({ lead: "", entries: [{ title: "T", link }], availableCount: 1 })).toContain("<li>T</li>");
+    }
+    expect(
+      renderDigestBodyHtml({ lead: "", entries: [{ title: "T", link: "http://example.com/1" }], availableCount: 1 }),
+    ).toContain('<a href="http://example.com/1">T</a>');
+  });
+
+  it("renders the lead alone when there is nothing to list", () => {
+    expect(renderDigestBodyHtml({ lead: "Quiet day.", entries: [], availableCount: 0 })).toBe("<p>Quiet day.</p>");
   });
 });
 
 describe("leadOf", () => {
-  it("takes the text before the first bullet", () => {
-    expect(leadOf("A busy day.\n[1] It shipped.")).toBe("A busy day.");
+  it("returns a plain answer as it is", () => {
+    expect(leadOf("A busy day.")).toBe("A busy day.");
   });
   it("joins a multi-line lead with spaces", () => {
-    expect(leadOf("First.\nSecond.\n\n[1] It shipped.")).toBe("First. Second.");
+    expect(leadOf("First.\nSecond.\n\n")).toBe("First. Second.");
   });
-  it("ignores text after the bullets", () => {
+  it("keeps only the text before bullets the model added anyway", () => {
     expect(leadOf("Lead.\n[1] It shipped.\nThanks for reading.")).toBe("Lead.");
+    expect(leadOf("Lead.\n- [1] It shipped.")).toBe("Lead.");
+    expect(leadOf("<p>Lead.</p><ul><li>[1] It shipped.</li></ul>")).toBe("Lead.");
+    expect(leadOf("Lead.<br>[1] It shipped.")).toBe("Lead.");
   });
   it("is empty when the answer opens with a bullet", () => {
     expect(leadOf("[1] It shipped.")).toBe("");
   });
-  it("uses the whole answer when the model wrote no bullet", () => {
-    expect(leadOf("- summary\nmore")).toBe("- summary more");
+  it("is empty for a blank answer, or one that is only markup", () => {
+    expect(leadOf("  \n ")).toBe("");
+    expect(leadOf("<script>alert(1)</script>")).toBe("");
   });
-  it("reduces markup in the lead to plain text", () => {
-    expect(leadOf("<p>Big <b>day</b></p>\n[1] x")).toBe("Big day");
+  it("reduces markup to plain text", () => {
+    expect(leadOf('<p>Big <b>day</b> at <a href="https://evil.example">x</a></p>')).toBe("Big day at x");
+  });
+  it("drops urls the model wrote", () => {
+    expect(leadOf("See https://evil.example/pay now.")).toBe("See now.");
+    expect(leadOf("詳細は https://evil.example/pay を参照。")).toBe("詳細は を参照。");
   });
 });

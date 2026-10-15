@@ -13,18 +13,13 @@ import type { FeedEntry } from "../feed/parse";
 import type { DigestLanguage } from "./language";
 import { escapeHtml } from "./html";
 import { moreEntriesText, untitledEntryText } from "./text";
+import { withoutUrls } from "../llm/sanitize";
 
 export const DEFAULT_DESCRIPTION_MAX_CHARS = 450;
 export const MIN_DESCRIPTION_MAX_CHARS = 100;
 
-// Printable ASCII only: urls are ASCII here, and \S would also swallow Japanese text glued after one.
-const URL_PATTERN = /https?:\/\/[\x21-\x7e]*/gi;
 const SENTENCE_END = /[。．.!?！？]/u;
 const ELLIPSIS = "…";
-
-function withoutUrls(text: string): string {
-  return text.replace(URL_PATTERN, "").replace(/\s+/g, " ").trim();
-}
 
 function paragraph(text: string): string {
   return `<p>${escapeHtml(text)}</p>`;

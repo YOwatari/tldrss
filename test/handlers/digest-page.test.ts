@@ -2,7 +2,7 @@ import { env as providedEnv, reset } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Env } from "../../src/env";
 import { handleDigestPage } from "../../src/handlers/digest-page";
-import { putDigestPage } from "../../src/store/digest-page";
+import { digestPageKey, putDigestPage } from "../../src/store/digest-page";
 
 const bindings = providedEnv as unknown as Env;
 
@@ -11,7 +11,12 @@ const REF = { hash: HASH, date: "2026-09-10", language: "en" } as const;
 
 const PAGE = {
   feedTitle: "Example Feed",
-  html: '<ul>\n  <li><a href="https://source.example/1">Entry 1</a><br />It shipped.</li>\n</ul>',
+  lead: "A busy day.",
+  entries: [
+    { title: "Entry 1", link: "https://source.example/1" },
+    { title: "Entry 2", link: "https://source.example/2" },
+  ],
+  availableCount: 2,
 };
 
 function get(path: string): Promise<Response> {
@@ -34,6 +39,35 @@ describe("handleDigestPage", () => {
     expect(body).toContain("<!DOCTYPE html>");
     expect(body).toContain('<a href="https://source.example/1">Entry 1</a>');
     expect(body).toContain("Daily Digest: Example Feed (2026-09-10)");
+  });
+
+  it("lists every entry with its link and no per-entry summary", async () => {
+    await putDigestPage(bindings.DIGEST_CACHE, REF, PAGE);
+
+    const body = await (await get(`/digest/${HASH}/2026-09-10`)).text();
+
+    expect(body).toContain("<p>A busy day.</p>");
+    expect(body).toContain('<li><a href="https://source.example/1">Entry 1</a></li>');
+    expect(body).toContain('<li><a href="https://source.example/2">Entry 2</a></li>');
+    expect(body).not.toContain("<br");
+  });
+
+  it("says how many entries MAX_ENTRIES left out", async () => {
+    await putDigestPage(bindings.DIGEST_CACHE, { ...REF, language: "ja" }, { ...PAGE, availableCount: 45 });
+
+    const body = await (await get(`/digest/${HASH}/2026-09-10?lang=ja`)).text();
+
+    expect(body).toContain("ほか 43 件（新しい順に 2 件まで掲載）");
+  });
+
+  it("serves a record of the legacy shape with its stored html", async () => {
+    const html = '<ul>\n  <li><a href="https://source.example/1">Entry 1</a><br />It shipped.</li>\n</ul>';
+    await bindings.DIGEST_CACHE.put(digestPageKey(REF), JSON.stringify({ feedTitle: "Example Feed", html }));
+
+    const response = await get(`/digest/${HASH}/2026-09-10`);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(html);
   });
 
   it("serves the page of the language the reader asked for", async () => {

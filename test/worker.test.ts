@@ -482,10 +482,10 @@ describe("GET /feed (upstream failures)", () => {
     errors.mockRestore();
   });
 
-  it("falls back when nothing of the model's answer survives sanitizing", async () => {
+  it("falls back when nothing of the model's answer survives reduction to plain text", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    // Non-blank, so the summarizer accepts it, yet it renders as nothing.
+    // Non-blank, so the summarizer accepts it, yet it leaves no lead behind.
     const { ai } = stubAi("<script>alert(1)</script>");
 
     await callWorker({ ...bindings, AI: ai });
@@ -656,33 +656,35 @@ describe("GET /feed (language)", () => {
 });
 
 describe("GET /digest (article links)", () => {
-  it("heads each bullet with a link to the article it summarizes", async () => {
-    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
+  it("lists every selected entry linked to its article, without a per-entry summary", async () => {
+    stubFeedFetch(() => new Response(rssWithEntries(3, hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("A busy day.\n[1] It shipped.").ai };
 
     const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    expect(page).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
-    expect(page).toContain("It shipped.");
+    expect(page).toContain("<p>A busy day.</p>");
+    for (const n of [1, 2, 3]) expect(page).toContain(`<li><a href="${FEED_ORIGIN}/${n}">Entry ${n}</a></li>`);
+    expect(page).not.toContain("It shipped.");
   });
 
-  it("drops a bullet citing an entry that does not exist", async () => {
+  it("shows the model's lead as plain text, without its markup or urls", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const env = { ...bindings, AI: stubAi("[1] It shipped.\n[7] Invented.").ai };
+    const env = { ...bindings, AI: stubAi('<p>Big <a href="https://evil.example/pay">day</a> https://evil.example/x</p>').ai };
 
     const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    expect(page).toContain("It shipped.");
-    expect(page).not.toContain("Invented.");
+    expect(page).toContain("<p>Big day</p>");
+    expect(page).not.toContain("evil.example");
   });
 
-  it("keeps the model's text rather than serving an empty digest", async () => {
-    stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const env = { ...bindings, AI: stubAi("[7] Invented.").ai };
+  it("says how many entries MAX_ENTRIES left off the page", async () => {
+    stubFeedFetch(() => new Response(rssWithEntries(40, hourAgo().toUTCString())));
+    const env = { ...bindings, AI: stubAi("Lead.").ai };
 
     const page = await (await callWorker(env, pageUrlOf(await digestOf(env)))).text();
 
-    expect(page).toContain("Invented.");
+    expect([...page.matchAll(/<li>/g)]).toHaveLength(30);
+    expect(page).toContain("…and 10 more (only the newest 30 are listed)");
   });
 });
 
@@ -698,7 +700,7 @@ describe("GET /feed (description)", () => {
   it.each(["en", "ja"])("fits a day with many entries into DESCRIPTION_MAX_CHARS and counts the rest (lang=%s)", async (lang) => {
     stubFeedFetch(() => new Response(rssWithEntries(60, hourAgo().toUTCString())));
 
-    const body = await digestOf({ ...bindings, AI: stubAi("Lead.\n[1] x").ai }, `${WORKER_URL}&lang=${lang}`);
+    const body = await digestOf({ ...bindings, AI: stubAi("Lead.").ai }, `${WORKER_URL}&lang=${lang}`);
     const description = descriptionOf(body);
     const listed = [...description.matchAll(/<li>/g)].length;
 
@@ -711,7 +713,7 @@ describe("GET /feed (description)", () => {
   it("honours a configured DESCRIPTION_MAX_CHARS", async () => {
     stubFeedFetch(() => new Response(rssWithEntries(10, hourAgo().toUTCString())));
 
-    const body = await digestOf({ ...bindings, AI: stubAi("Lead.\n[1] x").ai, DESCRIPTION_MAX_CHARS: "120" });
+    const body = await digestOf({ ...bindings, AI: stubAi("Lead.").ai, DESCRIPTION_MAX_CHARS: "120" });
 
     expect(descriptionOf(body).length).toBeLessThanOrEqual(120);
   });
@@ -770,7 +772,7 @@ describe("GET /feed (untitled entries)", () => {
     stubFeedFetch(() => new Response(untitledItem(hourAgo().toUTCString())));
 
     const body = await digestOf(
-      { ...bindings, AI: stubAi("[1] It shipped.").ai },
+      { ...bindings, AI: stubAi("It shipped.").ai },
       `${WORKER_URL}&lang=ja`,
     );
 
@@ -782,7 +784,7 @@ describe("GET /feed (untitled entries)", () => {
 describe("GET /digest/{hash}/{date}", () => {
   it("serves the full digest behind the link the item carries", async () => {
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
+    const env = { ...bindings, AI: stubAi("It shipped.").ai };
 
     const pageUrl = pageUrlOf(await digestOf(env));
     const response = await callWorker(env, pageUrl);
@@ -791,13 +793,12 @@ describe("GET /digest/{hash}/{date}", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(page).toContain(`<a href="${FEED_ORIGIN}/1">Entry 1</a>`);
-    expect(page).toContain("It shipped.");
   });
 
   it("addresses the page by the feed hash, so the link carries no credentials", async () => {
     const feedUrl = `${FEED_ORIGIN}/private.xml?token=secret`;
     stubFeedFetch(() => new Response(rssWithEntry(hourAgo().toUTCString())));
-    const env = { ...bindings, AI: stubAi("[1] It shipped.").ai };
+    const env = { ...bindings, AI: stubAi("It shipped.").ai };
 
     const pageUrl = pageUrlOf(
       await digestOf(env, `https://worker.example/feed?url=${encodeURIComponent(feedUrl)}`),

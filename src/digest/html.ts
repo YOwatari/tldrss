@@ -1,18 +1,21 @@
 /**
- * The digest body as an HTML fragment. Everything a reader sees is built here
- * from the feed, so the model's answer only ever contributes prose.
+ * The full-text page's body as an HTML fragment. Everything a reader sees is
+ * built here from the feed, so the model's answer only ever contributes the
+ * lead, as plain text.
  */
 import type { FeedEntry } from "../feed/parse";
-import type { DigestPeriod } from "./period";
-import { plainTextOf, sanitizeLlmHtml } from "../llm/sanitize";
+import { plainTextOf, withoutUrls } from "../llm/sanitize";
 import { DEFAULT_LANGUAGE, type DigestLanguage } from "./language";
-import { summaryUnavailableText, untitledEntryText } from "./text";
+import { pageMoreEntriesText, untitledEntryText } from "./text";
 
 /**
- * `[3] Something happened.` — the shape each bullet of the model's answer is
- * asked to take. A leading list marker is tolerated because models add one.
+ * `[3] Something happened.` — the per-entry bullet the prompt used to ask for.
+ * The prompt no longer does, but a model may still add them out of habit.
  */
 const BULLET_PATTERN = /^\s*(?:[-*•]\s*)?\[(\d+)\]\s*(.+)$/;
+
+/** Tags that break a line of the answer: paragraphs, list items, line breaks. */
+const BLOCK_TAG_PATTERN = /<\/?(?:p|div|ul|ol|li|br|h[1-6])\b[^>]*>/gi;
 
 /**
  * Escapes text for HTML. `escapeXml` in `rss.ts` serves a different layer: the
@@ -27,67 +30,23 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * The prose before the first bullet, as plain text.
+ * The lead in the model's answer, as plain text: no markup, no urls.
  *
- * Kept apart from `resolveBullets`: that needs entries to resolve numbers,
- * which the lead has no use for. With no bullet at all the whole answer is
- * the lead, so a day the model ignored the format still gives Slack something.
+ * The prompt asks for the lead alone. Should the model still list entries,
+ * only the prose before its first bullet is kept: the reader sees every title
+ * below the lead already. The answer is never trusted to be markup, and a url
+ * in it is no evidence the url exists — the model is prompted with
+ * attacker-controlled feed text — so both are reduced to text. An empty
+ * result means the answer held no lead, which the caller treats as a failure
+ * to summarize.
  */
 export function leadOf(summary: string): string {
-  const lines = summary.split("\n");
+  // Block tags end a line, so a bullet wrapped in `<li>` is found too.
+  const lines = summary.replace(BLOCK_TAG_PATTERN, "\n").split("\n");
   const firstBullet = lines.findIndex((line) => BULLET_PATTERN.test(line));
+  const prose = firstBullet === -1 ? summary : lines.slice(0, firstBullet).join("\n");
 
-  return plainTextOf(firstBullet === -1 ? summary : lines.slice(0, firstBullet).join("\n"));
-}
-
-/**
- * Pairs each bullet with the entry its number refers to, keeping feed order.
- * Numbers the model invented resolve to nothing and are dropped, so a bullet
- * can never end up under the wrong article.
- */
-function resolveBullets(
-  summary: string,
-  entries: FeedEntry[],
-): { lead: string[]; byEntry: Map<number, string>; sawBullet: boolean } {
-  const byEntry = new Map<number, string>();
-  const lead: string[] = [];
-  let sawBullet = false;
-
-  for (const line of summary.split("\n")) {
-    const match = BULLET_PATTERN.exec(line);
-    if (!match) {
-      // Prose introducing the digest; anything after the bullets is the
-      // model padding its answer and is dropped.
-      if (!sawBullet && line.trim() !== "") lead.push(line.trim());
-      continue;
-    }
-    sawBullet = true;
-
-    const index = Number(match[1]) - 1;
-    // Keep the first take when the model covers one entry twice.
-    if (!entries[index] || byEntry.has(index)) continue;
-
-    byEntry.set(index, match[2].trim());
-  }
-
-  return { lead, byEntry, sawBullet };
-}
-
-/**
- * Last resort: the model's own answer, reduced to markup a digest may carry.
- *
- * The prompt asks for plain lines, so this is usually just escaped text. A
- * model that answers in html anyway is the reason it goes through the
- * sanitizer rather than straight through `escapeHtml`. The entries are handed
- * over with it so that a link in the answer survives only when the feed
- * published it.
- */
-function renderRawText(summary: string, entries: FeedEntry[]): string {
-  return sanitizeLlmHtml(summary, {
-    allowedHrefs: entries
-      .map((entry) => safeHref(entry.link))
-      .filter((link): link is string => link !== null),
-  });
+  return withoutUrls(plainTextOf(prose));
 }
 
 /**
@@ -110,7 +69,7 @@ function safeHref(link: string | undefined): string | null {
 }
 
 /** The entry's title, linked to the article when the feed gave a usable url. */
-function renderHeading(entry: FeedEntry, language: DigestLanguage): string {
+function renderHeading(entry: Pick<FeedEntry, "title" | "link">, language: DigestLanguage): string {
   // Title and url come from the feed, never from the model.
   const title = escapeHtml(entry.title ?? untitledEntryText(language));
   const href = safeHref(entry.link);
@@ -118,59 +77,28 @@ function renderHeading(entry: FeedEntry, language: DigestLanguage): string {
   return href === null ? title : `<a href="${escapeHtml(href)}">${title}</a>`;
 }
 
-function renderItem(entry: FeedEntry, summary: string, language: DigestLanguage): string {
-  return `  <li>${renderHeading(entry, language)}<br />${escapeHtml(summary)}</li>`;
-}
-
 /**
- * Renders the digest body as an HTML fragment: an optional lead paragraph
- * followed by one linked article per bullet, built from the feed rather than
- * from the model's own formatting.
+ * Renders the full-text page's body: the lead, then every selected entry
+ * linked to its article, newest first, then how many the period held beyond
+ * `MAX_ENTRIES`.
  */
-export function renderDigestHtml(
-  summary: string,
-  entries: FeedEntry[],
-  language: DigestLanguage = DEFAULT_LANGUAGE,
-): string {
-  const { lead, byEntry, sawBullet } = resolveBullets(summary, entries);
+export function renderDigestBodyHtml(params: {
+  lead: string;
+  entries: Pick<FeedEntry, "title" | "link">[];
+  availableCount: number;
+  language?: DigestLanguage;
+}): string {
+  const { lead, entries, availableCount, language = DEFAULT_LANGUAGE } = params;
+  const parts: string[] = [];
 
-  // The model ignored the format, or there was nothing to summarize at all.
-  if (!sawBullet) return renderRawText(summary, entries);
+  if (lead !== "") parts.push(`<p>${escapeHtml(lead)}</p>`);
+  if (entries.length > 0) {
+    const items = entries.map((entry) => `  <li>${renderHeading(entry, language)}</li>`);
+    parts.push(`<ul>\n${items.join("\n")}\n</ul>`);
+  }
 
-  const items = entries
-    .map((entry, index) => {
-      const bullet = byEntry.get(index);
-      return bullet === undefined ? null : renderItem(entry, bullet, language);
-    })
-    .filter((item) => item !== null);
+  const left = availableCount - entries.length;
+  if (left > 0) parts.push(`<p>${escapeHtml(pageMoreEntriesText(left, entries.length, language))}</p>`);
 
-  // Not one bullet resolved to an entry. Showing the model's own text keeps
-  // something readable in the feed rather than an empty digest.
-  if (items.length === 0) return renderRawText(summary, entries);
-
-  const paragraph =
-    lead.length === 0 ? "" : `<p>${lead.map(escapeHtml).join("<br />")}</p>\n`;
-
-  return `${paragraph}<ul>\n${items.join("\n")}\n</ul>`;
-}
-
-/**
- * The digest body served when no summary could be produced: a note saying so,
- * then the day's entries as links.
- *
- * A subscription that goes silent on a model outage looks broken, and the
- * titles and links alone are still worth delivering, so the digest degrades
- * to this rather than to nothing.
- */
-export function renderEntryListHtml(
-  entries: FeedEntry[],
-  language: DigestLanguage = DEFAULT_LANGUAGE,
-  period: DigestPeriod = "daily",
-): string {
-  const notice = `<p>${escapeHtml(summaryUnavailableText(language, period))}</p>`;
-  if (entries.length === 0) return notice;
-
-  const items = entries.map((entry) => `  <li>${renderHeading(entry, language)}</li>`);
-
-  return `${notice}\n<ul>\n${items.join("\n")}\n</ul>`;
+  return parts.join("\n");
 }
