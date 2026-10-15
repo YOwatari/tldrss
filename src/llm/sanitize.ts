@@ -40,6 +40,12 @@ function withoutNonMarkup(raw: string): string {
 }
 
 /** One tag, tolerating quoted attribute values that contain `>`. */
+const BLOCK_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt", "figcaption", "figure",
+  "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre",
+  "section", "table", "td", "th", "tr", "ul",
+]);
+
 const TAG_PATTERN = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>?/g;
 
 const HREF_PATTERN = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
@@ -194,7 +200,13 @@ export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): str
  * leaving them encoded would show `&amp;` to the reader.
  */
 export function plainTextOf(raw: string): string {
-  return decodeHtmlEntities(withoutNonMarkup(raw).replace(TAG_PATTERN, ""))
+  // Block boundaries become a space so that adjacent paragraphs do not fuse
+  // into one word, which would also let url removal swallow the next word.
+  // Inline tags are dropped without one, so `<strong>a</strong>b` stays `ab`.
+  const text = withoutNonMarkup(raw).replace(TAG_PATTERN, (_match, _closing, name: string) =>
+    BLOCK_TAGS.has(name.toLowerCase()) ? " " : "",
+  );
+  return decodeHtmlEntities(text)
     .replace(/\s+/g, " ")
     .trim();
 }

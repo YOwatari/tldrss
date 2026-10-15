@@ -202,6 +202,10 @@ describe("plainTextOf", () => {
   it("returns a plain line as it is", () => {
     expect(plainTextOf("Something shipped.")).toBe("Something shipped.");
   });
+  it("separates the words of adjacent blocks and line breaks", () => {
+    expect(plainTextOf("<p>New SDK</p><p>Security fixes</p>")).toBe("New SDK Security fixes");
+    expect(plainTextOf("One<br>Two<br/>Three")).toBe("One Two Three");
+  });
   it("drops tags but keeps the text they wrapped", () => {
     expect(plainTextOf("<p>Hello <strong>world</strong></p>")).toBe("Hello world");
   });
