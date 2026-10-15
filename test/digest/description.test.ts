@@ -74,6 +74,10 @@ describe("renderDescriptionHtml", () => {
     expect(html).not.toMatch(/https?:\/\//i);
     expect(liTexts(html)[1]).toBe("(untitled)");
   });
+  it("removes only the url when Japanese text follows it without a space", () => {
+    const html = renderDescriptionHtml({ lead: "詳細はhttps://x/aを参照。次の文", entries: [], availableCount: 0, language: "ja", maxChars: 450 });
+    expect(html).toBe("<p>詳細はを参照。次の文</p>");
+  });
   it("escapes markup and measures the escaped length", () => {
     const html = renderDescriptionHtml({ lead: "<b>x</b>", entries: Array.from({ length: 20 }, () => entry("&".repeat(30))), availableCount: 20, language: "en", maxChars: 450 });
     expect(html).toContain("<p>&lt;b&gt;x&lt;/b&gt;</p>");

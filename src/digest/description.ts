@@ -17,7 +17,8 @@ import { moreEntriesText, untitledEntryText } from "./text";
 export const DEFAULT_DESCRIPTION_MAX_CHARS = 450;
 export const MIN_DESCRIPTION_MAX_CHARS = 100;
 
-const URL_PATTERN = /https?:\/\/\S*/gi;
+// Printable ASCII only: urls are ASCII here, and \S would also swallow Japanese text glued after one.
+const URL_PATTERN = /https?:\/\/[\x21-\x7e]*/gi;
 const SENTENCE_END = /[。．.!?！？]/u;
 const ELLIPSIS = "…";
 
