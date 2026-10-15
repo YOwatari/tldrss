@@ -31,6 +31,14 @@ const DECLARATION_PATTERN = /<!--[\s\S]*?(?:-->|$)|<![^>]*>?/g;
 /** ```` ```html ```` and its bare form, which models wrap answers in. */
 const CODE_FENCE_PATTERN = /```[a-zA-Z]*/g;
 
+function withoutNonMarkup(raw: string): string {
+  return raw
+    .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
+    .replace(RAW_TEXT_PATTERN, "")
+    .replace(DECLARATION_PATTERN, "")
+    .replace(CODE_FENCE_PATTERN, "");
+}
+
 /** One tag, tolerating quoted attribute values that contain `>`. */
 const TAG_PATTERN = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>?/g;
 
@@ -137,11 +145,7 @@ export type SanitizeOptions = {
 };
 
 export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): string {
-  const source = raw
-    .replace(SELF_CLOSED_RAW_TEXT_PATTERN, "")
-    .replace(RAW_TEXT_PATTERN, "")
-    .replace(DECLARATION_PATTERN, "")
-    .replace(CODE_FENCE_PATTERN, "");
+  const source = withoutNonMarkup(raw);
 
   const allowed = new Set(
     [...(options.allowedHrefs ?? [])]
@@ -182,4 +186,15 @@ export function sanitizeLlmHtml(raw: string, options: SanitizeOptions = {}): str
   parts.push(open.reverse().map((tag) => `</${tag}>`).join(""));
 
   return parts.join("").trim();
+}
+
+/**
+ * The model's answer as one line of plain text, for places that cannot carry
+ * markup. Entities are decoded because the renderer escapes the text again;
+ * leaving them encoded would show `&amp;` to the reader.
+ */
+export function plainTextOf(raw: string): string {
+  return decodeHtmlEntities(withoutNonMarkup(raw).replace(TAG_PATTERN, ""))
+    .replace(/\s+/g, " ")
+    .trim();
 }
