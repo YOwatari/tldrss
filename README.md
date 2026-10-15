@@ -23,7 +23,7 @@ The details below describe the default daily mode unless otherwise stated.
 
 ## Usage
 - Request: `GET /feed?url=https://example.com/rss.xml` (add `&lang=ja` for a Japanese digest). Other methods get a 405.
-- `GET /digest/{sha256(url)}/{JST date}?lang={en|ja}` serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's title links here. The item link always spells the language out, `lang=en` included, so it keeps pointing at the same digest if the default ever changes; `lang` may be omitted when requesting the page by hand, and then defaults to `en`.
+- `GET /digest/{sha256(url)}/{JST date}?lang={en|ja}` serves the full digest as an HTML page. Slack truncates the body of a feed item, so the item's `<description>` carries only the lead and the entry titles, with no article links; readers follow the item's link to this page for the full digest. The item link always spells the language out, `lang=en` included, so it keeps pointing at the same digest if the default ever changes; `lang` may be omitted when requesting the page by hand, and then defaults to `en`.
 - `/` answers with usage instructions; `/health` reports Cron and storage health, and any other path is a 404.
 - The worker fetches the target feed (RSS 2.0 or Atom), keeps the newest entries in the edition's fixed window (at most `MAX_ENTRIES`), summarizes them with [Workers AI](https://developers.cloudflare.com/workers-ai/), and returns a single-item RSS 2.0 digest.
 - Entries the feed gave no readable date are skipped, as are entries outside the fixed edition window: a feed with a skewed clock would otherwise pin them to the top of a later digest.
@@ -83,6 +83,7 @@ A cron trigger runs at 08:50 JST (`50 23 * * *` in UTC, the schedule Cloudflare 
 | `AI_MODEL` | var | Model id (default: `@cf/meta/llama-4-scout-17b-16e-instruct`) |
 | `MAX_ENTRIES` | var | Entries per digest (default: 30, capped at 100) |
 | `POST_NO_UPDATES` | var | Publish an item on a day with no new entries (default: off; `true` or `1` turns it on) |
+| `DESCRIPTION_MAX_CHARS` | var | Characters of html in the item's `<description>`, tags included (default: 450, at least 100). Slack cuts the body at about 520 |
 | `PUBLIC_ORIGIN` | var | The address readers reach the worker at, e.g. `https://tldrss.example`. Required by the scheduled run, which has no request to read an origin off; a run without it generates nothing |
 | `FEED_TIMEOUT_MS` | var | Upstream headers/body deadline per generation (default: 5000) |
 | `MAX_FEED_BYTES` | var | Maximum streamed upstream body size in bytes (default: 1000000) |
@@ -93,6 +94,8 @@ Swap `AI_MODEL` in `wrangler.toml` for any [text generation model](https://devel
 
 ## Digest body
 The model is asked for a lead paragraph and one plain-text bullet per entry, each citing an entry number. The worker builds the HTML itself from those numbers, so every title and link a reader sees comes from the feed rather than from the model. An answer that ignores the format is passed through `llm/sanitize.ts` instead, which keeps only `<p> <h3> <ul> <li> <a> <strong> <br>`, drops every attribute, balances what the model left open, and keeps an `href` only when it is one the feed published — the model is prompted with attacker-controlled feed text, so a url it writes is no evidence the url exists.
+
+The item's RSS `<description>` is `<p>lead</p><ul><li>title</li>…</ul>` followed by `<p>…and N more</p>` (`<p>…ほか N 件</p>` in Japanese), where N counts the entries left out of the list, including those dropped by `MAX_ENTRIES`. It carries no links or URLs and is packed within `DESCRIPTION_MAX_CHARS`. The lead is the part of the model's output before its bullets, as plain text. The full page keeps the bulleted HTML. Article links are left out because Slack's RSS app has no setting to stop it unfurling them, and a relay url of our own would be an open redirector.
 
 Swapping the model provider means implementing `Summarizer` (`src/llm/summarizer.ts`) and naming it in `src/index.ts`, the only place a provider appears; the handler takes a `Summarizer` and never builds one. Each summarization gets two attempts inside a 20-second budget, which leaves room for the feed fetch and the KV writes inside the 30 seconds Cloudflare grants `ctx.waitUntil` after a response.
 
